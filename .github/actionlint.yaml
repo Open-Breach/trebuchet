@@ -1,0 +1,9 @@
+# actionlint is run by tests/lint-workflows.sh. The entries below silence it
+# only where GitHub documents something that actionlint 1.7.12 does not know
+# yet. Remove an entry when a newer actionlint makes it unnecessary.
+paths:
+  .github/workflows/linux-packages.yml:
+    ignore:
+      # job.workflow_repository and job.workflow_sha tell a reusable workflow
+      # where its own file comes from (Contexts reference, `job` context).
+      - 'property "workflow_(repository|sha)" is not defined in object type'

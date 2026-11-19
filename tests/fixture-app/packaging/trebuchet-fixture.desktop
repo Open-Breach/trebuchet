@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Trebuchet Fixture
+Comment=Test fixture of the Trebuchet workflows
+Exec=trebuchet-fixture --version
+Icon=trebuchet-fixture
+Terminal=true
+Categories=Utility;

@@ -1,0 +1,99 @@
+name: linux-packages test
+# Calls linux-packages.yml the way an app does, with the fixture app under
+# tests/fixture-app, once for each build mode. Every target and architecture
+# builds, packages and passes the smoke test. Nothing is attached to a
+# release and no secret is used.
+#
+# Runners: the calls name none, so linux-packages.yml picks them the way it
+# does for any caller: Depot's when the repository belongs to Open-Breach,
+# GitHub's own for any other owner, and whatever the repository variables
+# RUNNER_LINUX_X64 and RUNNER_LINUX_ARM64 say where they are set.
+#
+# Runs when the workflow, its scripts, the target list or the fixture change,
+# and by hand from the Actions tab.
+on:
+  push:
+    paths:
+      - .github/workflows/linux-packages.yml
+      - .github/workflows/linux-packages-test.yml
+      - .github/scripts/linux-packages/**
+      - targets.json
+      - tests/fixture-app/**
+  pull_request:
+    paths:
+      - .github/workflows/linux-packages.yml
+      - .github/workflows/linux-packages-test.yml
+      - .github/scripts/linux-packages/**
+      - targets.json
+      - tests/fixture-app/**
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: linux-packages-test-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  # A cargo build with everything an app can pass: a build command of its
+  # own, a bundle with a file beside the binary, a desktop entry, icons, and
+  # dependencies per distro and per target.
+  cargo:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    uses: ./.github/workflows/linux-packages.yml
+    with:
+      app: trebuchet-fixture
+      version: 1.2.3
+      working-directory: tests/fixture-app
+      build-command: ./bundle.sh
+      bundle-dir: target/release/bundle
+      desktop-file: packaging/trebuchet-fixture.desktop
+      icon: packaging/icons/hicolor
+      build-deps: |
+        {
+          "debian": ["zlib1g-dev"],
+          "ubuntu": ["zlib1g-dev"],
+          "fedora": ["zlib-devel"]
+        }
+      runtime-deps: |
+        {
+          "debian": ["bash (>= 4)"],
+          "ubuntu-24.04": ["bash (>= 5)"],
+          "fedora": ["bash >= 4", "coreutils"]
+        }
+
+  # The folder a prebuilt app brings: here a shell script that prints the
+  # version, with a data file beside it. Uploaded as plain files, so it
+  # arrives without its executable bit, as any artifact does.
+  folder:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ${{ vars.RUNNER_LINUX_X64 || (github.repository_owner == 'Open-Breach' && 'depot-ubuntu-24.04-8' || 'ubuntu-24.04') }}
+    timeout-minutes: 5
+    steps:
+      - name: folder
+        run: |
+          mkdir -p folder/data
+          cat > folder/trebuchet-fixture <<'EOF'
+          #!/bin/sh
+          echo "trebuchet-fixture 1.2.3-rc1"
+          cat "$(dirname "$(readlink -f "$0")")/data/greeting.txt"
+          EOF
+          echo "prebuilt folder" > folder/data/greeting.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fixture-prebuilt
+          path: folder/
+          if-no-files-found: error
+
+  # A prebuilt folder with the least an app can pass: no desktop entry, no
+  # icon, a binary named differently from the package, a pre-release
+  # version, and one target left out.
+  prebuilt:
+    needs: folder
+    uses: ./.github/workflows/linux-packages.yml
+    with:
+      app: trebuchet-fixture-prebuilt
+      binary: trebuchet-fixture
+      version: 1.2.3-rc1
+      description: Trebuchet test fixture, prebuilt
+      build: prebuilt
+      artifact: fixture-prebuilt
+      exclude: debian-12

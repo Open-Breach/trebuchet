@@ -20,6 +20,7 @@ Apps build, Trebuchet publishes.
 ## Where to read
 
 - [`docs/spec.md`](docs/spec.md) is the source of truth: decisions, pipelines per platform, the plugin registry, hosting and the release flow.
+- [`docs/linux-packages.md`](docs/linux-packages.md) is for an app that wants its Linux packages built: how to call `linux-packages.yml` and what to bring.
 - [`docs/repositories.md`](docs/repositories.md) describes the apt and dnf repositories: the target list, the layout, the scripts and how to run the tests.
 - [`CLAUDE.md`](CLAUDE.md) holds the rules for agents and contributors working in this repo.
 
@@ -43,9 +44,11 @@ No secret is ever committed to this repo. Keys and tokens live in GitHub secrets
 
 ## Runners
 
-In a repository that belongs to Open-Breach, the workflows here run on [Depot](https://depot.dev) runners, under the label Open-Breach's other repositories use: `depot-ubuntu-24.04-8`.
+In a repository that belongs to Open-Breach, the workflows here run on [Depot](https://depot.dev) runners, under the labels Open-Breach's other repositories use: `depot-ubuntu-24.04-8` for x86-64 and `depot-ubuntu-24.04-arm-16` for arm64.
 
-In anyone else's repository, a fork for instance, the same jobs run on GitHub's own `ubuntu-24.04` runner without anything to set up. The repository variable `RUNNER_LINUX_X64` names another label in either case.
+In anyone else's repository, a fork for instance, the same jobs run on GitHub's own `ubuntu-24.04` and `ubuntu-24.04-arm` runners without anything to set up. The repository variables `RUNNER_LINUX_X64` and `RUNNER_LINUX_ARM64` name other labels in either case.
+
+`linux-packages.yml` follows the same rule by the owner of the repository that calls it, and takes the labels as its `runner-x64` and `runner-arm64` inputs as well ([`docs/linux-packages.md`](docs/linux-packages.md)).
 
 ## Licence
 

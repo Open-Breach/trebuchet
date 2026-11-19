@@ -1,0 +1,31 @@
+# The app the linux-packages test builds: one binary that prints its version.
+# Its packaging metadata is the kind docs/linux-packages.md asks an app for.
+[package]
+name = "trebuchet-fixture"
+version = "1.2.3"
+edition = "2021"
+description = "Trebuchet test fixture"
+license = "Apache-2.0"
+authors = ["Trebuchet tests <noreply@openbreach.dev>"]
+repository = "https://github.com/Open-Breach/trebuchet"
+publish = false
+
+# An app with files beside its binary: the bundle goes to /usr/lib/<app>/ and
+# the command on the PATH is a launcher that starts the binary there.
+[package.metadata.deb]
+assets = [
+  { source = "target/release/bundle/trebuchet-fixture", dest = "usr/lib/trebuchet-fixture/", mode = "755" },
+  { source = "target/release/bundle/data/*", dest = "usr/lib/trebuchet-fixture/data/", mode = "644" },
+  { source = "packaging/launcher.sh", dest = "usr/bin/trebuchet-fixture", mode = "755" },
+  { source = "packaging/trebuchet-fixture.desktop", dest = "usr/share/applications/", mode = "644" },
+  { source = "packaging/icons/hicolor/scalable/apps/trebuchet-fixture.svg", dest = "usr/share/icons/hicolor/scalable/apps/", mode = "644" },
+]
+
+[package.metadata.generate-rpm]
+assets = [
+  { source = "target/release/bundle/trebuchet-fixture", dest = "/usr/lib/trebuchet-fixture/trebuchet-fixture", mode = "755" },
+  { source = "target/release/bundle/data/*", dest = "/usr/lib/trebuchet-fixture/data/", mode = "644" },
+  { source = "packaging/launcher.sh", dest = "/usr/bin/trebuchet-fixture", mode = "755" },
+  { source = "packaging/trebuchet-fixture.desktop", dest = "/usr/share/applications/trebuchet-fixture.desktop", mode = "644" },
+  { source = "packaging/icons/hicolor/scalable/apps/trebuchet-fixture.svg", dest = "/usr/share/icons/hicolor/scalable/apps/trebuchet-fixture.svg", mode = "644" },
+]
