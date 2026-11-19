@@ -1,0 +1,14 @@
+{
+  "arches": [
+    { "id": "x86_64",  "deb": "amd64", "rpm": "x86_64",  "tarball": "x64" },
+    { "id": "aarch64", "deb": "arm64", "rpm": "aarch64", "tarball": "arm64" }
+  ],
+  "targets": [
+    { "id": "debian-12",    "image": "debian:12",    "format": "deb" },
+    { "id": "ubuntu-24.04", "image": "ubuntu:24.04", "format": "deb" },
+    { "id": "debian-13",    "image": "debian:13",    "format": "deb" },
+    { "id": "ubuntu-26.04", "image": "ubuntu:26.04", "format": "deb" },
+    { "id": "fedora-44",    "image": "fedora:44",    "format": "rpm" },
+    { "id": "fedora-45",    "image": "fedora:45",    "format": "rpm" }
+  ]
+}
