@@ -81,7 +81,7 @@ All of them take the root directory of a local copy of the repository and read `
 | `rpm/prune.sh RPM_ROOT [KEEP]` | Deletes all but the `KEEP` highest versions of every package, per repository and architecture. Default 3. |
 | `rpm/sign.sh RPM_ROOT PUBLIC_KEYRING` | Signs the `repomd.xml` of every repository: `repomd.xml.asc`. |
 
-The order is add, prune, build the index, sign. A target without packages still gets its empty indexes, so `apt update` and `dnf` work against it from the first publish.
+The order is add, prune, build the index, sign. The publisher runs them in that order between a download of the pool from the bucket and an upload of the result ([`publisher.md`](publisher.md)). A target without packages still gets its empty indexes, so `apt update` and `dnf` work against it from the first publish.
 
 ## Old versions
 
@@ -122,6 +122,7 @@ tests/run.sh              # every tests/test-*.sh
 | `tests/test-signed-repo.sh` | The whole path with a throwaway key generated in the test: five versions added, pruned to three, indexed, signed, then verified and installed by the real `apt` and `dnf`, each in a container of its target, including a downgrade and the refusal of a wrong key. Run once with an RSA key that has a passphrase and once with an Ed25519 key that has none. Needs docker. |
 | `tests/test-install-detect.sh` | Which repository `install.sh` picks, from the `os-release` of every target and of the derivatives in [`install.md`](install.md). A dry run: nothing is installed. |
 | `tests/test-install.sh` | The one-liner end to end: the site as it is served (signed repositories, key, `install.sh`) on a local HTTP server, and `curl ... \| sh -s <package>` in a clean container of every target. Needs docker and the network. |
+| `tests/test-publish.sh` | The publisher's steps against an S3 server on the same machine: four releases published one after the other, the bucket checked, and the one-line installer run against what the bucket holds. Needs docker, the network, the AWS CLI and moto's S3 server; see the top of the file. |
 
 On a machine whose containers reach the network only through a proxy, `TREBUCHET_TEST_DOCKER_ARGS` adds arguments to the tests' `docker run`.
 

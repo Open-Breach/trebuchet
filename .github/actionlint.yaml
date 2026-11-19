@@ -7,3 +7,8 @@ paths:
       # job.workflow_repository and job.workflow_sha tell a reusable workflow
       # where its own file comes from (Contexts reference, `job` context).
       - 'property "workflow_(repository|sha)" is not defined in object type'
+  .github/workflows/publish.yml:
+    ignore:
+      # concurrency.queue: max keeps every waiting run in the group, up to
+      # 100, where the default keeps one (Workflow syntax, `concurrency`).
+      - 'unexpected key "queue" for "concurrency" section'

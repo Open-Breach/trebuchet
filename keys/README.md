@@ -18,6 +18,8 @@ They are the same key in two forms:
 
 `openbreach.gpg` is `openbreach.asc` run through `gpg --dearmor`, and the two must never drift. `tests/test-keys.sh` checks that on every push, along with the fingerprint above and that neither file holds anything secret.
 
+The publisher serves both as they are, at `https://get.openbreach.dev/keys/openbreach.asc` and `https://get.openbreach.dev/keys/openbreach.gpg`, and checks every signature it makes against `openbreach.gpg`.
+
 To look at the key yourself:
 
 ```sh
