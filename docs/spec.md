@@ -72,7 +72,7 @@ Not pursued: official Debian or Fedora inclusion (too much work for the crate co
 ### 4.3 Plugins as packages
 
 - An app with plugins splits into several packages from one build. The main package (`rick`) carries the binary, what it needs beside it, and the plugins the app counts as part of every install. Every other plugin is its own package, `<app>-plugin-<id>` (`rick-plugin-git`), whose files land in the app's plugins directory beside the binary.
-- Which plugins belong to the main package is the app's decision and is named in the app's call, not here. For Rick it is still open (11).
+- Which plugins belong to the main package is the app's decision and is named in the app's call, not here. Rick's list is in its `specs/plugin-distribution.md`, section 4: sixteen plugins in the `rick` package, and on Linux nine separate ones.
 - Each plugin package depends on the exact version of the main package (`Depends: rick (= X.Y.Z)` / `Requires: rick = X.Y.Z`): a Rick plugin loads only in the Rick build it was made with (7.3).
 - A meta package, `<app>-plugins`, pulls in the whole set.
 - The plugin packages come out of the same matrix job as the main package, so they link against the same distro libraries. They are published by the same publisher into the same pool.
@@ -169,7 +169,7 @@ Not pursued: official Debian or Fedora inclusion (too much work for the crate co
 
 ### 7.3 Rick's plugins
 
-- A Rick plugin shares Rick's kernel libraries as Rust dynamic libraries, so a build of a plugin loads only in the Rick release it was built with, on the toolchain that built both. Every Rick release therefore publishes a complete set of plugin builds, and a build's `app_version` is the only Rick it fits.
+- A Rick plugin shares Rick's kernel libraries as Rust dynamic libraries, so a build of a plugin loads only in the Rick release it was built with, on the toolchain that built both. Every Rick release therefore publishes a build of every separate plugin, and a build's `app_version` is the only Rick it fits. The plugins Rick ships inside every install are not in the registry.
 - The file is Rick's plugin package, an `.rkp`: a zip archive that holds the plugin's folder as it sits in the plugins directory. Rick's Extensions dialogue installs the same file from disk.
 - Linux builds in the registry are the ones made with the release tarball. They fit a Rick started from that tarball (and from the AUR package, which repackages it). A Rick installed from a deb or an rpm takes its plugins from the plugin packages of 4.3.
 
@@ -248,7 +248,6 @@ Not pursued: official Debian or Fedora inclusion (too much work for the crate co
 - Exact dnf repo layout for future Fedora versions (one repo per version versus `$releasever` substitution).
 - Whether the install script also handles AUR helpers on Arch or just points to the AUR page.
 - Meeseeks on Debian 12 once a GTK floor decision is revisited.
-- Which Rick plugins belong to the `rick` package and the release archives and which are separate (4.3). Rick decides; until then the call lists none as separate.
 - Listing plugins that are not built in Rick's workspace (7.1). Needs a plugin boundary in Rick that survives a Rick release: a stable ABI or the WASM host.
 - Whether the registry keeps more than the last three releases of an app's plugins (7.4), for users who stay on an old Rick.
 
