@@ -69,18 +69,51 @@ All of them take the root directory of a local copy of the repository and read `
 | --- | --- |
 | `apt/add-packages.sh APT_ROOT FILE.deb...` | Copies each file into `pool/<suite>/`. Refuses a file for a target or architecture that `targets.json` does not list. |
 | `apt/build-index.sh APT_ROOT` | Rebuilds `Packages`, `Packages.gz` and `Release` of every suite over its whole pool. |
+| `apt/prune.sh APT_ROOT [KEEP]` | Deletes all but the `KEEP` highest versions of every package, per suite and architecture. Default 3. |
+| `apt/sign.sh APT_ROOT PUBLIC_KEYRING` | Signs the `Release` file of every suite: `Release.gpg` and `InRelease`. |
 | `rpm/add-packages.sh RPM_ROOT FILE.rpm...` | Copies each file into `<target>/<arch>/`; a `noarch` package into every architecture. Same refusals. |
 | `rpm/build-index.sh RPM_ROOT` | Rebuilds `repodata/` of every repository over all of its packages. |
+| `rpm/prune.sh RPM_ROOT [KEEP]` | Deletes all but the `KEEP` highest versions of every package, per repository and architecture. Default 3. |
+| `rpm/sign.sh RPM_ROOT PUBLIC_KEYRING` | Signs the `repomd.xml` of every repository: `repomd.xml.asc`. |
 
-A target without packages still gets its empty indexes, so `apt update` and `dnf` work against it from the first publish. The index scripts leave `Release` and `repomd.xml` unsigned.
+The order is add, prune, build the index, sign. A target without packages still gets its empty indexes, so `apt update` and `dnf` work against it from the first publish.
+
+## Old versions
+
+The three highest versions of every package stay, so a downgrade by one or two releases works; older files are deleted by the prune scripts. "Highest" is the package manager's own order, `dpkg --compare-versions` for deb and rpm's comparison of epoch, version and release for rpm. A pre-release `1.3.0~rc1` is older than `1.3.0` and counts as a version of its own.
+
+## Signing
+
+One key signs everything, the Open-Breach key whose public half is in [`keys/`](../keys/), as `openbreach.asc` and, in binary form, as `openbreach.gpg`:
+
+| | Signed file | Signature | The user's setting |
+| --- | --- | --- | --- |
+| apt | `dists/<suite>/Release` | `Release.gpg` (detached) and `InRelease` (clear-signed) | `signed-by=` on the source line |
+| dnf | `repodata/repomd.xml` | `repomd.xml.asc` (detached) | `repo_gpgcheck=1` |
+
+`Release` and `repomd.xml` carry the checksums of the indexes, and the indexes carry the checksums of the packages, so the one signature covers every package. The packages themselves are not signed; that is why the dnf repository is set up with `gpgcheck=0` and `repo_gpgcheck=1`.
+
+The sign scripts use the secret key in gpg's keyring, `GNUPGHOME`. A passphrase comes from the environment variable `GPG_PASSPHRASE` and reaches gpg on a file descriptor, never on a command line. With more than one secret key in the keyring, `TREBUCHET_GPG_KEY` names the one to use.
+
+Each signature is checked right away with `gpgv` against `PUBLIC_KEYRING`, the public key that users are given. A repository signed with any other key fails in the script, not on a user's machine.
+
+Rebuilding an index deletes its old signatures, so an index is never left beside a signature that does not belong to it.
 
 ## Tests
 
 ```sh
-sudo apt-get install apt-utils createrepo-c rpm jq shellcheck
+sudo apt-get install apt-utils createrepo-c rpm jq gnupg shellcheck
 tests/lint-shell.sh       # shellcheck on every script
 tests/lint-workflows.sh   # actionlint on every workflow
 tests/run.sh              # every tests/test-*.sh
 ```
 
-`tests/fixture/build.sh` builds the fixture package, a shell script that prints its version, for every target and architecture. `tests/test-index.sh` is the dry run of the index scripts against it. CI runs the same three commands on every push and pull request (`.github/workflows/ci.yml`); none of them needs a secret.
+`tests/fixture/build.sh` builds the fixture package, a shell script that prints its version, for every target and architecture.
+
+| Test | Checks |
+| --- | --- |
+| `tests/test-index.sh` | The dry run of the index scripts: the fixture added to an empty pool and indexed, nothing signed. |
+| `tests/test-keys.sh` | The committed public key: `keys/openbreach.gpg` is `keys/openbreach.asc` dearmoured, neither holds secret material, and the documentation prints the key's fingerprint. |
+| `tests/test-signed-repo.sh` | The whole path with a throwaway key generated in the test: five versions added, pruned to three, indexed, signed, then verified and installed by the real `apt` and `dnf`, each in a container of its target, including a downgrade and the refusal of a wrong key. Run once with an RSA key that has a passphrase and once with an Ed25519 key that has none. Needs docker. |
+
+CI runs the same three commands on every push and pull request (`.github/workflows/ci.yml`). None of them needs a secret. The signing tests use keys they generate in a temporary directory and delete with it; of the real key only the public half is ever read.
