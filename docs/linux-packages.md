@@ -9,8 +9,8 @@ For every target in [`targets.json`](../targets.json) and for x86-64 and arm64:
 1. **Build**, inside the target's official container image on a runner of the matching architecture. No cross-compiling, no emulation: the package links against that distro's own libraries.
 2. **Package**: a `.deb` or an `.rpm`.
 3. **Tarball**: one target per architecture also makes `<app>-<version>-linux-<arch>.tar.gz` in the established layout.
-4. **Smoke test**, in a fresh container of the same image: install the package with `apt` or `dnf`, run `<binary> --version`, validate the desktop entry with `desktop-file-validate`. The tarball is unpacked and tested the same way.
-5. **Upload** everything as artifacts of the run.
+4. **Smoke test**, in a fresh container of the same image: install the package with `apt` or `dnf`, run `<binary> --version`, validate the desktop entry with `desktop-file-validate`. The tarball is unpacked and tested the same way. An app can add [checks of its own](#a-smoke-test-of-the-apps-own).
+5. **Upload** everything as artifacts of the run, with [what the build added](#files-the-build-adds).
 6. **Attach** everything to a GitHub Release of the calling repository, if the call names one and every smoke test passed.
 
 arm64 packages are built and smoke-tested on arm64 runners, and are otherwise untested until someone with hardware reports back (spec, decision 4).
@@ -58,7 +58,10 @@ jobs:
 | `release-tag` | both | none | Tag of the GitHub Release to attach the files to. Empty: artifacts only. |
 | `build-deps` | cargo | `{}` | Distro packages the build needs, per distro, in the shape of `runtime-deps`. Names only. |
 | `build-command` | cargo | `cargo build --release --locked` | The command that builds the app, run with bash in `working-directory`. |
+| `build-artifact` | cargo | none | Name of an artifact of the same run that the build needs, downloaded before `build-command`. See [Files from an earlier job](#files-from-an-earlier-job). |
+| `build-artifact-path` | cargo | `.` | Where `build-artifact` is put, relative to `working-directory`. |
 | `cargo-package` | cargo | `app` | The crate that carries the packaging metadata, when the repository is a workspace and the crate is not named like the package. |
+| `smoke-command` | both | none | A command of the app's that the smoke test runs as well, with bash in `working-directory`. See [A smoke test of the app's own](#a-smoke-test-of-the-apps-own). |
 | `bundle-dir` | cargo | none | A folder the build lays out, with the binary at its top level and what belongs beside it. The tarball is made from it. Without it the binary alone is the bundle. |
 | `working-directory` | both | `.` | Directory of the app in the calling repository. The other paths are relative to it. |
 | `maintainer` | prebuilt | the repository's owner | The package's maintainer field. |
@@ -130,8 +133,86 @@ Two things to know about the tools:
 | `TREBUCHET_FORMAT` | `deb` |
 | `TREBUCHET_ARCH` | `x86_64` or `aarch64` |
 | `TREBUCHET_VERSION` | `1.2.3` |
+| `TREBUCHET_TARBALL` | `true` in the one job per architecture whose build also becomes the tarball, `false` in the others |
+| `TREBUCHET_DIST` | the folder the job uploads, see [Files the build adds](#files-the-build-adds) |
 
 If the build lays out a folder, name it in `bundle-dir`: the tarball is made from that folder, and the app's `Cargo.toml` assets point into it.
+
+### Files the build adds
+
+The package and the tarball are written to the folder `TREBUCHET_DIST` names, and the job uploads that folder whole. A build command may put files of its own there. They travel with the package: into the job's artifact, to the smoke test, and with `release-tag` onto the release. Trebuchet passes them along and does not look at them.
+
+- **Files that belong to one build.** Some files fit the build they were made with and no other, such as add-ons compiled against it. The tarball is such a build's output too, so they are added where `TREBUCHET_TARBALL` is `true`: once per architecture, from the same build as the tarball.
+- **Names.** The files of every job end up side by side, in the release or wherever the caller gathers the artifacts. A name therefore says what the tarball's name says, the version and the architecture, or it is overwritten by its namesake from another job.
+- **Plain files, at the top of the folder.** A folder inside it cannot be attached to a release.
+- **No second package or tarball.** The smoke test expects one `.deb` or `.rpm` in the folder, and at most one `.tar.gz`.
+
+```bash
+if [ "$TREBUCHET_TARBALL" = true ]; then
+  cp target/release/addons/*.zip "$TREBUCHET_DIST/"
+fi
+```
+
+A prebuilt folder runs no build command, so it adds nothing.
+
+### Files from an earlier job
+
+Some files are made once for a release and belong in every package: a generated list of third-party licences, for one. A job of the caller makes them and uploads them as an artifact; the call names the artifact in `build-artifact`, and every build job downloads it before it runs `build-command`:
+
+```yaml
+jobs:
+  licenses:
+    runs-on: ubuntu-24.04
+    steps:
+      # ... generate THIRD-PARTY-LICENSES.md and third-party.json ...
+      - uses: actions/upload-artifact@v7
+        with:
+          name: third-party-licenses
+          path: |
+            THIRD-PARTY-LICENSES.md
+            third-party.json
+  linux:
+    needs: licenses
+    uses: Open-Breach/trebuchet/.github/workflows/linux-packages.yml@main
+    with:
+      app: rick
+      version: 1.2.3
+      build-artifact: third-party-licenses
+```
+
+The files land in `working-directory`, or in the folder under it that `build-artifact-path` names. From there the build command copies them into the bundle, or the `Cargo.toml` assets name them directly. An artifact does not keep file modes, so a file that has to be executable is made so by the build command.
+
+A prebuilt folder needs none of this: it is an artifact already and brings its files itself.
+
+## A smoke test of the app's own
+
+The workflow's smoke test knows what every app has: a package that installs, a binary that answers `--version`, a desktop entry. What only the app knows, that its plugins load or that it opens a file, goes into a command of the app's, named in `smoke-command`:
+
+```yaml
+    with:
+      app: rick
+      version: 1.2.3
+      smoke-command: .github/scripts/linux-smoke.sh
+```
+
+It runs with bash, as root, in the fresh container of the target's image, in `working-directory` of a checkout of the calling repository. It runs after the package is installed with nothing but its declared dependencies, and before anything else is installed, so a library the package forgot to ask for fails the command the way it would fail on a user's machine. Where the target also built the tarball, the command runs a second time for the unpacked tarball. A command that fails fails the job, and nothing is attached to a release.
+
+| Variable | Meaning |
+| --- | --- |
+| `TREBUCHET_SMOKE` | `package`: the package is installed and the binary is on the `PATH`. `tarball`: the tarball is unpacked. |
+| `TREBUCHET_SMOKE_DIR` | For the tarball, the unpacked folder with the binary at its top level. Empty for the package. |
+| `TREBUCHET_DIST` | The folder with the files of the build job: the package, the tarball where the target built one, and [what the build added](#files-the-build-adds). |
+| `TREBUCHET_TARGET`, `TREBUCHET_FORMAT`, `TREBUCHET_ARCH`, `TREBUCHET_VERSION` | As for the build command. |
+
+Three limits to know:
+
+- **The container is not quite empty.** `git` is installed before the package, for the checkouts, and with it the libraries git needs. A dependency on one of those is not noticed.
+- **The tarball is tested with the package installed.** The tarball declares no dependencies; the package brought the libraries.
+- **What the command installs, it installs for itself.** A tool the command needs, it installs after the checks that should notice a missing library.
+
+A file the command needs from the build, such as a test program compiled with it, reaches it through `TREBUCHET_DIST`, and so is uploaded with the package; with `release-tag` it would be attached to the release as well.
+
+`tests/fixture-app/smoke.sh` is such a command.
 
 ## A prebuilt folder
 
@@ -168,7 +249,7 @@ A prebuilt folder is built once, so the same binary goes into every target's pac
 
 ## What comes out
 
-One artifact per target and architecture, named `linux_<app>_<target>_<arch>`, with these files:
+One artifact per target and architecture, named `linux_<app>_<target>_<arch>`, with these files, and with [what the build added](#files-the-build-adds):
 
 | File | Example |
 | --- | --- |
@@ -193,7 +274,7 @@ Copying `share/` into `~/.local/share/` installs the desktop entry and the icons
 
 ## The release
 
-With `release-tag`, the last job attaches every package and tarball to that release of the calling repository:
+With `release-tag`, the last job attaches every file of the artifacts to that release of the calling repository, the packages, the tarballs and what the builds added:
 
 - A release that exists for the tag, draft or published, gets the files. A file of the same name is replaced, so a re-run repairs a failed one.
 - Where there is no release yet, a **draft** is created for the tag on the run's commit. Publishing it, with its title and notes, is the caller's step, once all of its platforms are attached.
@@ -228,7 +309,7 @@ An input wins over a variable, and a variable over the table. An input that is p
 
 ## Testing a change
 
-`.github/workflows/linux-packages-test.yml` calls the workflow with the app under `tests/fixture-app`, once as a cargo build with every input and once as a prebuilt folder with the fewest. It runs when the workflow, its scripts, `targets.json` or the fixture change, and by hand from the Actions tab. It needs no secret and attaches nothing.
+`.github/workflows/linux-packages-test.yml` calls the workflow with the app under `tests/fixture-app`, once as a cargo build with every input and once as a prebuilt folder with the fewest. The cargo build adds a file to the uploaded folder in the tarball's job, and its smoke command checks that the file is there and in no other job. It runs when the workflow, its scripts, `targets.json` or the fixture change, and by hand from the Actions tab. It needs no secret and attaches nothing.
 
 The test names no runners, so in a fork it runs on GitHub's runners by the rule above, with nothing to set.
 

@@ -4,7 +4,9 @@ name: linux-packages
 # container image, makes the .deb or .rpm, runs the smoke test in a fresh
 # container of the same image, and uploads the result as an artifact. One
 # target per architecture also makes the tarball. With `release-tag`, all of
-# it is attached to that GitHub Release of the calling repository.
+# it is attached to that GitHub Release of the calling repository. A build
+# may add files of its own to the folder that is uploaded, and the smoke
+# test runs one more command of the app's where the call names one.
 #
 # How to call it, and what the app has to bring: docs/linux-packages.md.
 #
@@ -69,12 +71,24 @@ on:
         description: "build: cargo only. The command that builds the app, run with bash in working-directory."
         type: string
         default: cargo build --release --locked
+      build-artifact:
+        description: "build: cargo only. Name of an artifact of the same run that the build needs: files an earlier job of the caller made, such as generated licence lists. Downloaded before build-command."
+        type: string
+        default: ""
+      build-artifact-path:
+        description: "build: cargo only. Where build-artifact is put, relative to working-directory. Default: working-directory itself."
+        type: string
+        default: "."
       cargo-package:
         description: "build: cargo only. The crate that carries the packaging metadata, in a workspace. Default: app."
         type: string
         default: ""
       bundle-dir:
         description: "build: cargo only. A folder the build lays out, with the binary at its top level and what belongs beside it; the tarball is made from it. Default: the binary alone."
+        type: string
+        default: ""
+      smoke-command:
+        description: "A command of the app's for the smoke test, run with bash in working-directory of a checkout of the calling repository: once after the package is installed in the fresh container, and once more for the unpacked tarball where the target built one. Default: none."
         type: string
         default: ""
       working-directory:
@@ -139,6 +153,8 @@ jobs:
           TREBUCHET_DESCRIPTION: ${{ inputs.description }}
           TREBUCHET_BUILD: ${{ inputs.build }}
           TREBUCHET_ARTIFACT: ${{ inputs.artifact }}
+          TREBUCHET_BUILD_ARTIFACT: ${{ inputs.build-artifact }}
+          TREBUCHET_BUILD_ARTIFACT_PATH: ${{ inputs.build-artifact-path }}
           TREBUCHET_EXCLUDE: ${{ inputs.exclude }}
           TREBUCHET_RUNTIME_DEPS: ${{ inputs.runtime-deps }}
           TREBUCHET_BUILD_DEPS: ${{ inputs.build-deps }}
@@ -174,6 +190,8 @@ jobs:
       TREBUCHET_ARCH: ${{ matrix.arch }}
       TREBUCHET_PKGARCH: ${{ matrix.pkgarch }}
       TREBUCHET_TARARCH: ${{ matrix.tararch }}
+      # true in the one job per architecture whose build is also the tarball.
+      TREBUCHET_TARBALL: ${{ matrix.tarball }}
     steps:
       # git before the checkouts, so that they are clones with their history
       # and not archive downloads; curl and jq for the scripts. The paths are
@@ -254,6 +272,15 @@ jobs:
           TREBUCHET_BUILD_DEPS: ${{ matrix.build_deps }}
         run: |
           "$SCRIPTS/prepare.sh"
+      # Files an earlier job of the caller made, put where its build command
+      # looks for them. The action takes a relative path from the workspace,
+      # where the app was checked out. An artifact does not keep file modes.
+      - name: build artifact
+        if: inputs.build == 'cargo' && inputs.build-artifact != ''
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.build-artifact }}
+          path: ${{ format('{0}/{1}', inputs.working-directory, inputs.build-artifact-path) }}
       - name: build
         if: inputs.build == 'cargo'
         working-directory: ${{ inputs.working-directory }}
@@ -282,6 +309,8 @@ jobs:
           TREBUCHET_ICON: ${{ inputs.icon }}
         run: |
           "$SCRIPTS/tarball.sh"
+      # The whole folder: the package, the tarball, and whatever the build
+      # command put there itself.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linux_${{ inputs.app }}_${{ matrix.target }}_${{ matrix.arch }}
@@ -309,10 +338,16 @@ jobs:
     env:
       TREBUCHET_APP: ${{ inputs.app }}
       TREBUCHET_BINARY: ${{ needs.plan.outputs.binary }}
+      TREBUCHET_VERSION: ${{ inputs.version }}
       TREBUCHET_PACKAGE_VERSION: ${{ needs.plan.outputs.package-version }}
+      TREBUCHET_TARGET: ${{ matrix.target }}
       TREBUCHET_FORMAT: ${{ matrix.format }}
+      TREBUCHET_ARCH: ${{ matrix.arch }}
       TREBUCHET_DESKTOP_FILE: ${{ inputs.desktop-file }}
     steps:
+      # git for the checkouts, and nothing else before the package: what is
+      # installed here cannot be missed by the test. The paths are set from
+      # inside the container, as in the build job.
       - name: git
         run: |
           if [ "$TREBUCHET_FORMAT" = deb ]; then
@@ -322,19 +357,38 @@ jobs:
           else
             dnf -y install ca-certificates git-core tar gzip findutils
           fi
+          {
+            echo "SCRIPTS=$RUNNER_TEMP/trebuchet/.github/scripts/linux-packages"
+            echo "TREBUCHET_DIST=$RUNNER_TEMP/trebuchet-dist"
+          } >> "$GITHUB_ENV"
+      # This workflow's scripts, moved out of the workspace, which the
+      # checkout of the app below would empty.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
           path: .trebuchet
           persist-credentials: false
+      - name: scripts
+        run: |
+          rm -rf "$RUNNER_TEMP/trebuchet"
+          cp -R .trebuchet "$RUNNER_TEMP/trebuchet"
+          rm -rf .trebuchet
+      # The app's repository, for a smoke command that is a script of it.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: inputs.smoke-command != ''
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: linux_${{ inputs.app }}_${{ matrix.target }}_${{ matrix.arch }}
-          path: .trebuchet-dist
+          path: ${{ env.TREBUCHET_DIST }}
       - name: smoke test
+        env:
+          TREBUCHET_SMOKE_COMMAND: ${{ inputs.smoke-command }}
+          TREBUCHET_WORKING_DIRECTORY: ${{ inputs.working-directory }}
         run: |
-          .trebuchet/.github/scripts/linux-packages/smoke.sh .trebuchet-dist
+          "$SCRIPTS/smoke.sh" "$TREBUCHET_DIST"
 
   # Only when every package passed its smoke test.
   release:
