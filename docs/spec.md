@@ -213,7 +213,8 @@ Not pursued: official Debian or Fedora inclusion (too much work for the crate co
 
 ### 7.6 Update notice
 
-- `apps.<app>.latest` carries the version and the release URL of the app's newest release; the publisher writes it on every release of any app. Rick, Meeseeks and Gossip check it (opt-out in settings) and show a small notice in About when a newer version exists. On Linux the notice says to update through the package manager; on macOS and Windows it links to the download. No in-app installer.
+- `apps.<app>.latest` carries the version and the release URL of the app's newest release; the publisher writes it on every release of any app. Rick, Meeseeks and Gossip read it (opt-out in settings) and show a notice when a newer version exists. Where the notice shows is the app's own rule; Rick's is in its `specs/plugin-distribution.md`, section 6. No in-app installer.
+- What the notice offers goes by how the app was installed, not by the platform. A packaged install is one from a deb or an rpm, which marks itself with a file named `package` beside the binary; its notice says to update through the package manager. Every other install links to the release page: the archives on all three platforms, a Linux tarball included.
 
 ## 8. Hosting and domain
 
@@ -249,6 +250,7 @@ Not pursued: official Debian or Fedora inclusion (too much work for the crate co
 - Meeseeks on Debian 12 once a GTK floor decision is revisited.
 - Listing plugins that are not built in Rick's workspace (7.1). Needs a plugin boundary in Rick that survives a Rick release: a stable ABI or the WASM host.
 - Whether the registry keeps more than the last three releases of an app's plugins (7.4), for users who stay on an old Rick.
+- Whether an install through the AUR, the Homebrew cask or winget counts as packaged for the update notice (7.6). Today it does not: none of them carries the `package` file, so the notice links to the release page.
 
 ## 12. Next steps
 
