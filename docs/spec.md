@@ -19,6 +19,7 @@ Not pursued: official Debian or Fedora inclusion (too much work for the crate co
 7. A plugin registry lives next to the package repos: one signed index file that lists, per app, the plugins the app's releases publish, with one download per platform. Rick is the first app with plugins. Open-Breach's own plugins only. The same index carries each app's latest version so apps can show an update notice themselves.
 8. Host: Cloudflare R2 behind the custom domain `get.openbreach.dev` (domain `openbreach.dev`, DNS on Cloudflare). Decided and set up 2026-11-18; Azure Blob Storage was the alternative.
 9. Closed-source apps go through the same channels; nothing in the chosen path requires an open licence.
+10. Every release artefact of a public repository carries a GitHub build attestation, made by the workflow that builds it. There is no other signature on the artefacts themselves: no Sigstore signatures beside it, and no signature bundle for plugins. Decided 2026-11-19; see *Build attestations* in section 3.
 
 ## 3. The distribution repository
 
@@ -49,9 +50,21 @@ Not pursued: official Debian or Fedora inclusion (too much work for the crate co
 ### Release flow for an app
 
 1. Developer bumps the version, updates the README, merges to `main`, pushes tag `vX.Y.Z`.
-2. The app's release workflow calls the reusable workflows. Each produces its artifacts and attaches them to a GitHub Release for the tag. Guards from the Rick and Meeseeks specs stay: tagged commit on `main`, tag equals `Cargo.toml` version and README status line, desktop file validates.
+2. The app's release workflow calls the reusable workflows. Each produces its artifacts, attests them (*Build attestations*, below) and attaches them to a GitHub Release for the tag. Guards from the Rick and Meeseeks specs stay: tagged commit on `main`, tag equals `Cargo.toml` version and README status line, desktop file validates.
 3. The app's workflow sends a `repository_dispatch` to `Open-Breach/trebuchet` with the app name, version and release URL.
 4. The publisher pulls the packages, republishes the repos, writes the app's latest version into the registry index and adds the release's plugins to it when the release carries any (7.4), and bumps the AUR package, Homebrew cask and winget manifest.
+
+### Build attestations
+
+A build attestation is a record, signed by GitHub and kept publicly with the repository, that says: this file was built by this workflow, in this repository, from this commit. Nobody holds a key for it.
+
+- **Who attests.** The workflow run that builds a file attests it, and only that run: a file fetched from a release, or built by another run, is never attested. A reusable workflow of this repository attests everything it builds or hands out for the release: `linux-packages.yml` the debs, the rpms and the archive, and `macos-dmg.yml` and `windows-installer.yml` their artefacts when they exist. What an app still builds in its own workflow, that workflow attests.
+- **The publisher attests nothing.** It builds nothing. What it writes is signed otherwise: the repository indexes with the GPG key (4.4), the registry index with its own key (7.5).
+- **How.** The step is `actions/attest` with the files as its `subject-path`. The job needs the permissions `id-token: write` and `attestations: write`. A reusable workflow cannot give itself more than its caller has, so the calling job grants both, beside the `contents` permission it grants already; `docs/` says so for each workflow.
+- **Private repositories.** GitHub offers attestations to private repositories on its Enterprise Cloud plan only. A workflow here skips the step when the calling repository is private, so flowcpt's packages carry none.
+- **Verifying.** The attestation is found through the app's repository, and its signer is the workflow that made it. For a file a workflow of this repository built, the signer has to be named:
+  `gh attestation verify <file> --owner Open-Breach --signer-repo Open-Breach/trebuchet`
+  For a file the app's own workflow built: `gh attestation verify <file> --repo Open-Breach/<app>`. The install documentation and each app's README give the line that fits the file.
 
 ## 4. Linux
 
@@ -226,12 +239,17 @@ Not pursued: official Debian or Fedora inclusion (too much work for the crate co
 
 ## 9. Signing and secrets — Serge's checklist
 
-- GPG key for the apt and dnf repositories; public key in the distribution repo, private key in the distribution repo's secrets.
-- Registry signing key (7.5): a minisign key pair made with `minisign -G -p registry.pub -s registry.key`; `registry.pub` committed as `keys/registry.pub`, the contents of `registry.key` as the secret `REGISTRY_SIGNING_KEY`, its password as `REGISTRY_SIGNING_PASSWORD`.
-- AUR account and SSH key, in the distribution repo's secrets.
-- Apple: Developer ID Application certificate exported as `.p12`, its password, and an App Store Connect API key for notarisation, in each Mac-building app repo's secrets or in an organisation secret.
-- GitHub token with permission to open pull requests against `winget-pkgs` and to push to the Homebrew tap.
-- R2 API token scoped to the one bucket, read and write, for the publisher.
+This section is the one place that names secrets; the apps' specs point here and name none. A name below is a GitHub Actions secret unless it says variable. Build attestations need no secret (section 3).
+
+- **GPG key of the apt and dnf repositories**, in this repository: `GPG_PRIVATE_KEY`, the armored private key, and `GPG_PASSPHRASE`. The public key is committed under `keys/`. No expiry and no rotation plan: a key that leaks is replaced, the new public key is published, and users add it again.
+- **Registry signing key** (7.5), in this repository: a minisign key pair made with `minisign -G -p registry.pub -s registry.key`; `registry.pub` committed as `keys/registry.pub`, the contents of `registry.key` as `REGISTRY_SIGNING_KEY`, its password as `REGISTRY_SIGNING_PASSWORD`.
+- **The bucket**, in this repository: `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` and `R2_ENDPOINT`, from an R2 API token scoped to the one bucket, read and write; the bucket's name as the variable `R2_BUCKET`.
+- **The dispatch to the publisher**, in each app's repository: `TREBUCHET_DISPATCH_TOKEN`, a fine-grained token with *Contents: read and write* on this repository only (`docs/publisher.md`).
+- **Apple**, as organisation secrets or in each Mac-building app's repository; the app's call hands them to `macos-dmg.yml`, since a reusable workflow sees only the secrets its caller passes:
+  - `MACOS_CERT_P12`: the Developer ID Application certificate, exported as `.p12` and base64-encoded, and `MACOS_CERT_PASSWORD`, its password.
+  - `NOTARY_KEY_ID`, `NOTARY_ISSUER_ID` and `NOTARY_KEY_P8`: the App Store Connect API key for `notarytool`, its key id, its issuer id and the text of its `.p8` file.
+- **AUR** account and SSH key, in this repository. The secret is named here when the AUR step is built.
+- **GitHub token** with permission to open pull requests against `winget-pkgs` and to push to the Homebrew tap, in this repository. Named here when those steps are built.
 - Depot: GitHub app enabled for the distribution repo and every consuming repo; arm64 runner labels configured.
 - Done: `openbreach.dev` on Cloudflare, bucket created, `get.openbreach.dev` attached.
 
@@ -261,4 +279,5 @@ Not pursued: official Debian or Fedora inclusion (too much work for the crate co
 5. Add the macOS and Windows reusable workflows for Rick.
 6. Add `flake.nix` to each Rust repo.
 7. Add the plugin registry: the publisher's side here (7.4, 7.5) and the plugin packages (4.3); Rick's side in the Rick repository.
-8. Done 2026-11-18: domain, bucket, custom domain and token. Remaining: put the token into Trebuchet's secrets.
+8. Add the attest step to `linux-packages.yml`, with the two permissions in its documented call and the skip for a private caller (section 3, *Build attestations*). Not built as of 2026-11-19.
+9. Done 2026-11-18: domain, bucket, custom domain and token. Remaining: put the token into Trebuchet's secrets.
