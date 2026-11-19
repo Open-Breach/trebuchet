@@ -20,6 +20,7 @@ Apps build, Trebuchet publishes.
 ## Where to read
 
 - [`docs/spec.md`](docs/spec.md) is the source of truth: decisions, pipelines per platform, the plugin registry, hosting and the release flow.
+- [`docs/install.md`](docs/install.md) is for users: how to install an app, by script or by hand, and on which distros.
 - [`docs/linux-packages.md`](docs/linux-packages.md) is for an app that wants its Linux packages built: how to call `linux-packages.yml` and what to bring.
 - [`docs/repositories.md`](docs/repositories.md) describes the apt and dnf repositories: the target list, the layout, the scripts and how to run the tests.
 - [`CLAUDE.md`](CLAUDE.md) holds the rules for agents and contributors working in this repo.
@@ -29,12 +30,13 @@ Apps build, Trebuchet publishes.
 - `.github/workflows/`: the reusable workflows and the publisher, plus this repo's own CI.
 - `targets.json`: the distro releases and architectures everything is built for, in one place.
 - `apt/`, `rpm/`: the scripts that build the repository indexes.
+- `install.sh`: the one-line installer served from `get.openbreach.dev`.
 - `registry/`: the scripts behind the plugin registry (not started).
 - `keys/`: the public signing keys.
 - `docs/`: the spec and the documentation.
 - `tests/`: the fixture package and the tests CI runs.
 
-Install instructions land in `docs/install.md` once the first packages are published.
+To install an app, see [`docs/install.md`](docs/install.md).
 
 ## Why this repo is public
 

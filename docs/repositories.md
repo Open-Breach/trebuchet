@@ -38,7 +38,12 @@ A new distro release is one new line under `targets`. A release that has left th
 
 ## Layout
 
+Under `https://get.openbreach.dev/`:
+
 ```
+install.sh                                            the one-line installer
+keys/openbreach.gpg                                   the public key, as a keyring for apt
+keys/openbreach.asc                                   the same key as text, for dnf
 apt/
   dists/<suite>/Release                               one suite per deb target
   dists/<suite>/main/binary-<arch>/Packages{,.gz}     amd64 and arm64 in the same suite
@@ -115,5 +120,9 @@ tests/run.sh              # every tests/test-*.sh
 | `tests/test-index.sh` | The dry run of the index scripts: the fixture added to an empty pool and indexed, nothing signed. |
 | `tests/test-keys.sh` | The committed public key: `keys/openbreach.gpg` is `keys/openbreach.asc` dearmoured, neither holds secret material, and the documentation prints the key's fingerprint. |
 | `tests/test-signed-repo.sh` | The whole path with a throwaway key generated in the test: five versions added, pruned to three, indexed, signed, then verified and installed by the real `apt` and `dnf`, each in a container of its target, including a downgrade and the refusal of a wrong key. Run once with an RSA key that has a passphrase and once with an Ed25519 key that has none. Needs docker. |
+| `tests/test-install-detect.sh` | Which repository `install.sh` picks, from the `os-release` of every target and of the derivatives in [`install.md`](install.md). A dry run: nothing is installed. |
+| `tests/test-install.sh` | The one-liner end to end: the site as it is served (signed repositories, key, `install.sh`) on a local HTTP server, and `curl ... \| sh -s <package>` in a clean container of every target. Needs docker and the network. |
+
+On a machine whose containers reach the network only through a proxy, `TREBUCHET_TEST_DOCKER_ARGS` adds arguments to the tests' `docker run`.
 
 CI runs the same three commands on every push and pull request (`.github/workflows/ci.yml`). None of them needs a secret. The signing tests use keys they generate in a temporary directory and delete with it; of the real key only the public half is ever read.

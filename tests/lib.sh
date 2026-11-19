@@ -98,3 +98,39 @@ image_of() {
 require_docker() {
   docker info > /dev/null 2>&1 || fail "this test runs apt and dnf in the targets' containers and needs a working docker"
 }
+
+# docker_run ARGS...: `docker run --rm ARGS`. TREBUCHET_TEST_DOCKER_ARGS adds
+# arguments for a machine whose containers need them to reach the network,
+# such as proxy settings.
+docker_run() {
+  local extra=()
+  if [ -n "${TREBUCHET_TEST_DOCKER_ARGS:-}" ]; then
+    read -r -a extra <<< "$TREBUCHET_TEST_DOCKER_ARGS"
+  fi
+  docker run --rm "${extra[@]}" "$@"
+}
+
+# make_site SITE GNUPGHOME VERSION...: lay out under SITE what is served at
+# get.openbreach.dev, with the fixture package in the given versions and
+# signed with the test key of GNUPGHOME (make_test_key, without passphrase):
+#
+#   SITE/apt/  SITE/rpm/  SITE/keys/openbreach.{gpg,asc}  SITE/install.sh
+make_site() {
+  local site="$1" gnupg="$2" packages version
+  shift 2
+  packages="$(mktemp -d)"
+  for version in "$@"; do
+    "$repo_root/tests/fixture/build.sh" "$packages" "$version" > /dev/null
+  done
+  "$repo_root/apt/add-packages.sh" "$site/apt" "$packages"/*.deb > /dev/null
+  "$repo_root/rpm/add-packages.sh" "$site/rpm" "$packages"/*.rpm > /dev/null
+  rm -rf "$packages"
+  "$repo_root/apt/build-index.sh" "$site/apt" > /dev/null
+  "$repo_root/rpm/build-index.sh" "$site/rpm" > /dev/null
+  GNUPGHOME="$gnupg" "$repo_root/apt/sign.sh" "$site/apt" "$gnupg/public.gpg" > /dev/null
+  GNUPGHOME="$gnupg" "$repo_root/rpm/sign.sh" "$site/rpm" "$gnupg/public.gpg" > /dev/null
+  mkdir -p "$site/keys"
+  cp "$gnupg/public.gpg" "$site/keys/openbreach.gpg"
+  cp "$gnupg/public.asc" "$site/keys/openbreach.asc"
+  cp "$repo_root/install.sh" "$site/install.sh"
+}
