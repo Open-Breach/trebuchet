@@ -16,7 +16,7 @@ They are the same key in two forms:
 | `openbreach.asc` | ASCII-armoured text | dnf, through `gpgkey=` |
 | `openbreach.gpg` | binary keyring | apt, through `signed-by=`; a `.gpg` file has to be binary there |
 
-`openbreach.gpg` is `openbreach.asc` run through `gpg --dearmor`, and the two must never drift.
+`openbreach.gpg` is `openbreach.asc` run through `gpg --dearmor`, and the two must never drift. `tests/test-keys.sh` checks that on every push, along with the fingerprint above and that neither file holds anything secret.
 
 To look at the key yourself:
 

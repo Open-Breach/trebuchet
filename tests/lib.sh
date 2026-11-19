@@ -52,3 +52,49 @@ repodata() {
     *) fail "unknown compression: $file" ;;
   esac
 }
+
+# make_test_key HOME rsa|ed25519 [PASSPHRASE]: generate a throwaway signing
+# key in a new GNUPGHOME and leave its public half beside it, as a keyring
+# (public.gpg, for apt and gpgv) and armoured (public.asc, for dnf). The key
+# never leaves HOME; the caller stops its agent (stop_gpg_agent) and deletes
+# the directory when it is done.
+make_test_key() {
+  local home="$1" type="$2" passphrase="${3:-}"
+  mkdir -p "$home"
+  chmod 700 "$home"
+  {
+    case "$type" in
+      rsa) printf 'Key-Type: RSA\nKey-Length: 3072\n' ;;
+      ed25519) printf 'Key-Type: EDDSA\nKey-Curve: ed25519\n' ;;
+      *) fail "unknown key type $type" ;;
+    esac
+    printf 'Key-Usage: sign\nName-Real: Trebuchet test key (%s)\nName-Email: noreply@openbreach.dev\nExpire-Date: 1d\n' "$type"
+    if [ -n "$passphrase" ]; then
+      printf 'Passphrase: %s\n' "$passphrase"
+    else
+      printf '%%no-protection\n'
+    fi
+    printf '%%commit\n'
+  } | GNUPGHOME="$home" gpg --batch --quiet --no-tty --generate-key
+  GNUPGHOME="$home" gpg --batch --quiet --no-tty --export > "$home/public.gpg"
+  GNUPGHOME="$home" gpg --batch --quiet --no-tty --export --armor > "$home/public.asc"
+  # The agent remembers the passphrase it was just given. Stopped, so that
+  # signing needs the passphrase again, as it does on a machine that only
+  # imported the key.
+  stop_gpg_agent "$home"
+}
+
+# Stop the gpg-agent of a GNUPGHOME, which would otherwise outlive the test.
+stop_gpg_agent() {
+  GNUPGHOME="$1" gpgconf --kill gpg-agent 2> /dev/null || true
+}
+
+# The container image of a target.
+image_of() {
+  jq -r --arg id "$1" '.targets[] | select(.id == $id) | .image' "$targets"
+}
+
+# The tests that need a real apt or dnf run it in the target's container.
+require_docker() {
+  docker info > /dev/null 2>&1 || fail "this test runs apt and dnf in the targets' containers and needs a working docker"
+}

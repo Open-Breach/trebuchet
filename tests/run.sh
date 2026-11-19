@@ -3,10 +3,13 @@
 #
 #   tests/run.sh [tests/test-NAME.sh...]
 #
-# Needs jq, dpkg-deb, apt-ftparchive (apt-utils), rpmbuild (rpm) and
-# createrepo_c; on Debian or Ubuntu:
+# Needs jq, dpkg-deb, apt-ftparchive (apt-utils), rpmbuild (rpm),
+# createrepo_c and gpg; on Debian or Ubuntu:
 #
-#   sudo apt-get install apt-utils createrepo-c rpm jq
+#   sudo apt-get install apt-utils createrepo-c rpm jq gnupg
+#
+# The tests that install from a repository run apt and dnf in the targets'
+# containers and need docker.
 set -uo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
