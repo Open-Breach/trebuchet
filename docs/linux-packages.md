@@ -10,7 +10,7 @@ For every target in [`targets.json`](../targets.json) and for x86-64 and arm64:
 2. **Package**: a `.deb` or an `.rpm`.
 3. **Tarball**: one target per architecture also makes `<app>-<version>-linux-<arch>.tar.gz` in the established layout.
 4. **Smoke test**, in a fresh container of the same image: install the package with `apt` or `dnf`, run `<binary> --version`, validate the desktop entry with `desktop-file-validate`. The tarball is unpacked and tested the same way.
-5. **Upload** everything as artifacts of the run.
+5. **Upload** everything as artifacts of the run, with [what the build added](#files-the-build-adds).
 6. **Attach** everything to a GitHub Release of the calling repository, if the call names one and every smoke test passed.
 
 arm64 packages are built and smoke-tested on arm64 runners, and are otherwise untested until someone with hardware reports back (spec, decision 4).
@@ -132,8 +132,27 @@ Two things to know about the tools:
 | `TREBUCHET_FORMAT` | `deb` |
 | `TREBUCHET_ARCH` | `x86_64` or `aarch64` |
 | `TREBUCHET_VERSION` | `1.2.3` |
+| `TREBUCHET_TARBALL` | `true` in the one job per architecture whose build also becomes the tarball, `false` in the others |
+| `TREBUCHET_DIST` | the folder the job uploads, see [Files the build adds](#files-the-build-adds) |
 
 If the build lays out a folder, name it in `bundle-dir`: the tarball is made from that folder, and the app's `Cargo.toml` assets point into it.
+
+### Files the build adds
+
+The package and the tarball are written to the folder `TREBUCHET_DIST` names, and the job uploads that folder whole. A build command may put files of its own there. They travel with the package: into the job's artifact, to the smoke test, and with `release-tag` onto the release. Trebuchet passes them along and does not look at them.
+
+- **Files that belong to one build.** Some files fit the build they were made with and no other, such as add-ons compiled against it. The tarball is such a build's output too, so they are added where `TREBUCHET_TARBALL` is `true`: once per architecture, from the same build as the tarball.
+- **Names.** The files of every job end up side by side, in the release or wherever the caller gathers the artifacts. A name therefore says what the tarball's name says, the version and the architecture, or it is overwritten by its namesake from another job.
+- **Plain files, at the top of the folder.** A folder inside it cannot be attached to a release.
+- **No second package or tarball.** The smoke test expects one `.deb` or `.rpm` in the folder, and at most one `.tar.gz`.
+
+```bash
+if [ "$TREBUCHET_TARBALL" = true ]; then
+  cp target/release/addons/*.zip "$TREBUCHET_DIST/"
+fi
+```
+
+A prebuilt folder runs no build command, so it adds nothing.
 
 ### Files from an earlier job
 
@@ -199,7 +218,7 @@ A prebuilt folder is built once, so the same binary goes into every target's pac
 
 ## What comes out
 
-One artifact per target and architecture, named `linux_<app>_<target>_<arch>`, with these files:
+One artifact per target and architecture, named `linux_<app>_<target>_<arch>`, with these files, and with [what the build added](#files-the-build-adds):
 
 | File | Example |
 | --- | --- |
@@ -224,7 +243,7 @@ Copying `share/` into `~/.local/share/` installs the desktop entry and the icons
 
 ## The release
 
-With `release-tag`, the last job attaches every package and tarball to that release of the calling repository:
+With `release-tag`, the last job attaches every file of the artifacts to that release of the calling repository, the packages, the tarballs and what the builds added:
 
 - A release that exists for the tag, draft or published, gets the files. A file of the same name is replaced, so a re-run repairs a failed one.
 - Where there is no release yet, a **draft** is created for the tag on the run's commit. Publishing it, with its title and notes, is the caller's step, once all of its platforms are attached.

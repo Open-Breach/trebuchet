@@ -184,6 +184,8 @@ jobs:
       TREBUCHET_ARCH: ${{ matrix.arch }}
       TREBUCHET_PKGARCH: ${{ matrix.pkgarch }}
       TREBUCHET_TARARCH: ${{ matrix.tararch }}
+      # true in the one job per architecture whose build is also the tarball.
+      TREBUCHET_TARBALL: ${{ matrix.tarball }}
     steps:
       # git before the checkouts, so that they are clones with their history
       # and not archive downloads; curl and jq for the scripts. The paths are
@@ -301,6 +303,8 @@ jobs:
           TREBUCHET_ICON: ${{ inputs.icon }}
         run: |
           "$SCRIPTS/tarball.sh"
+      # The whole folder: the package, the tarball, and whatever the build
+      # command put there itself.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linux_${{ inputs.app }}_${{ matrix.target }}_${{ matrix.arch }}

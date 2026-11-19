@@ -23,3 +23,22 @@ mkdir -p target/release/bundle/data
 cp target/release/trebuchet-fixture target/release/bundle/
 echo "bundled for ${TREBUCHET_TARGET:-no target} ${TREBUCHET_ARCH:-}" > target/release/bundle/data/greeting.txt
 if [ -n "$extra" ]; then cp "$extra" target/release/bundle/data/; fi
+
+# A file of the build's own, for the folder the workflow uploads: written in
+# the one job per architecture whose build is also the tarball, as an app
+# does with files that fit that build and no other. smoke.sh looks for it
+# there, and for none of it in the other jobs.
+if [ -n "${TREBUCHET_TARGET:-}" ]; then
+  case "${TREBUCHET_TARBALL:-}" in
+    true)
+      mkdir -p "${TREBUCHET_DIST:?}"
+      echo "from the build of $TREBUCHET_TARGET $TREBUCHET_ARCH" \
+        > "$TREBUCHET_DIST/trebuchet-fixture-$TREBUCHET_VERSION-$TREBUCHET_ARCH.built-on.txt"
+      ;;
+    false) ;;
+    *)
+      echo "bundle.sh: TREBUCHET_TARBALL is '${TREBUCHET_TARBALL:-}', neither true nor false" >&2
+      exit 1
+      ;;
+  esac
+fi
