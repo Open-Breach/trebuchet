@@ -22,6 +22,8 @@ version="${TREBUCHET_VERSION:-}"
 description="${TREBUCHET_DESCRIPTION:-}"
 build="${TREBUCHET_BUILD:-cargo}"
 artifact="${TREBUCHET_ARTIFACT:-}"
+build_artifact="${TREBUCHET_BUILD_ARTIFACT:-}"
+build_artifact_path="${TREBUCHET_BUILD_ARTIFACT_PATH:-.}"
 exclude="${TREBUCHET_EXCLUDE:-}"
 runtime_deps="${TREBUCHET_RUNTIME_DEPS:-}"
 build_deps="${TREBUCHET_BUILD_DEPS:-}"
@@ -49,9 +51,19 @@ runner_arm64="${TREBUCHET_RUNNER_ARM64:-}"
 case "$build" in
   cargo)
     [ -z "$artifact" ] || die "artifact is for build: prebuilt"
+    if [ -n "$build_artifact" ]; then
+      # The characters an artifact's name cannot have, and no line break.
+      [[ ! "$build_artifact" =~ [\"\:\<\>\|\*\?\\/[:cntrl:]] ]] \
+        || die "build-artifact '$build_artifact' is not the name of an artifact"
+      # A place inside the app's directory: relative, and never upwards.
+      if [[ ! "$build_artifact_path" =~ ^[A-Za-z0-9._][A-Za-z0-9._/-]*$ ]] || [[ "/$build_artifact_path/" =~ /\.\./ ]]; then
+        die "build-artifact-path '$build_artifact_path' is not a path inside working-directory"
+      fi
+    fi
     ;;
   prebuilt)
     [ -n "$artifact" ] || die "build: prebuilt needs artifact, the name of the uploaded folder"
+    [ -z "$build_artifact" ] || die "build-artifact is for build: cargo; a prebuilt folder brings its files itself"
     [ -n "$description" ] || die "build: prebuilt needs description"
     [ "$(jq -n --arg d "$description" '$d | test("\n")')" = false ] || die "description is a single line"
     ;;

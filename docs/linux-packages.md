@@ -58,6 +58,8 @@ jobs:
 | `release-tag` | both | none | Tag of the GitHub Release to attach the files to. Empty: artifacts only. |
 | `build-deps` | cargo | `{}` | Distro packages the build needs, per distro, in the shape of `runtime-deps`. Names only. |
 | `build-command` | cargo | `cargo build --release --locked` | The command that builds the app, run with bash in `working-directory`. |
+| `build-artifact` | cargo | none | Name of an artifact of the same run that the build needs, downloaded before `build-command`. See [Files from an earlier job](#files-from-an-earlier-job). |
+| `build-artifact-path` | cargo | `.` | Where `build-artifact` is put, relative to `working-directory`. |
 | `cargo-package` | cargo | `app` | The crate that carries the packaging metadata, when the repository is a workspace and the crate is not named like the package. |
 | `bundle-dir` | cargo | none | A folder the build lays out, with the binary at its top level and what belongs beside it. The tarball is made from it. Without it the binary alone is the bundle. |
 | `working-directory` | both | `.` | Directory of the app in the calling repository. The other paths are relative to it. |
@@ -132,6 +134,35 @@ Two things to know about the tools:
 | `TREBUCHET_VERSION` | `1.2.3` |
 
 If the build lays out a folder, name it in `bundle-dir`: the tarball is made from that folder, and the app's `Cargo.toml` assets point into it.
+
+### Files from an earlier job
+
+Some files are made once for a release and belong in every package: a generated list of third-party licences, for one. A job of the caller makes them and uploads them as an artifact; the call names the artifact in `build-artifact`, and every build job downloads it before it runs `build-command`:
+
+```yaml
+jobs:
+  licenses:
+    runs-on: ubuntu-24.04
+    steps:
+      # ... generate THIRD-PARTY-LICENSES.md and third-party.json ...
+      - uses: actions/upload-artifact@v7
+        with:
+          name: third-party-licenses
+          path: |
+            THIRD-PARTY-LICENSES.md
+            third-party.json
+  linux:
+    needs: licenses
+    uses: Open-Breach/trebuchet/.github/workflows/linux-packages.yml@main
+    with:
+      app: rick
+      version: 1.2.3
+      build-artifact: third-party-licenses
+```
+
+The files land in `working-directory`, or in the folder under it that `build-artifact-path` names. From there the build command copies them into the bundle, or the `Cargo.toml` assets name them directly. An artifact does not keep file modes, so a file that has to be executable is made so by the build command.
+
+A prebuilt folder needs none of this: it is an artifact already and brings its files itself.
 
 ## A prebuilt folder
 
