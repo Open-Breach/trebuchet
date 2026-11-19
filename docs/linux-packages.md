@@ -9,7 +9,7 @@ For every target in [`targets.json`](../targets.json) and for x86-64 and arm64:
 1. **Build**, inside the target's official container image on a runner of the matching architecture. No cross-compiling, no emulation: the package links against that distro's own libraries.
 2. **Package**: a `.deb` or an `.rpm`.
 3. **Tarball**: one target per architecture also makes `<app>-<version>-linux-<arch>.tar.gz` in the established layout.
-4. **Smoke test**, in a fresh container of the same image: install the package with `apt` or `dnf`, run `<binary> --version`, validate the desktop entry with `desktop-file-validate`. The tarball is unpacked and tested the same way.
+4. **Smoke test**, in a fresh container of the same image: install the package with `apt` or `dnf`, run `<binary> --version`, validate the desktop entry with `desktop-file-validate`. The tarball is unpacked and tested the same way. An app can add [checks of its own](#a-smoke-test-of-the-apps-own).
 5. **Upload** everything as artifacts of the run, with [what the build added](#files-the-build-adds).
 6. **Attach** everything to a GitHub Release of the calling repository, if the call names one and every smoke test passed.
 
@@ -61,6 +61,7 @@ jobs:
 | `build-artifact` | cargo | none | Name of an artifact of the same run that the build needs, downloaded before `build-command`. See [Files from an earlier job](#files-from-an-earlier-job). |
 | `build-artifact-path` | cargo | `.` | Where `build-artifact` is put, relative to `working-directory`. |
 | `cargo-package` | cargo | `app` | The crate that carries the packaging metadata, when the repository is a workspace and the crate is not named like the package. |
+| `smoke-command` | both | none | A command of the app's that the smoke test runs as well, with bash in `working-directory`. See [A smoke test of the app's own](#a-smoke-test-of-the-apps-own). |
 | `bundle-dir` | cargo | none | A folder the build lays out, with the binary at its top level and what belongs beside it. The tarball is made from it. Without it the binary alone is the bundle. |
 | `working-directory` | both | `.` | Directory of the app in the calling repository. The other paths are relative to it. |
 | `maintainer` | prebuilt | the repository's owner | The package's maintainer field. |
@@ -183,6 +184,36 @@ The files land in `working-directory`, or in the folder under it that `build-art
 
 A prebuilt folder needs none of this: it is an artifact already and brings its files itself.
 
+## A smoke test of the app's own
+
+The workflow's smoke test knows what every app has: a package that installs, a binary that answers `--version`, a desktop entry. What only the app knows, that its plugins load or that it opens a file, goes into a command of the app's, named in `smoke-command`:
+
+```yaml
+    with:
+      app: rick
+      version: 1.2.3
+      smoke-command: .github/scripts/linux-smoke.sh
+```
+
+It runs with bash, as root, in the fresh container of the target's image, in `working-directory` of a checkout of the calling repository. It runs after the package is installed with nothing but its declared dependencies, and before anything else is installed, so a library the package forgot to ask for fails the command the way it would fail on a user's machine. Where the target also built the tarball, the command runs a second time for the unpacked tarball. A command that fails fails the job, and nothing is attached to a release.
+
+| Variable | Meaning |
+| --- | --- |
+| `TREBUCHET_SMOKE` | `package`: the package is installed and the binary is on the `PATH`. `tarball`: the tarball is unpacked. |
+| `TREBUCHET_SMOKE_DIR` | For the tarball, the unpacked folder with the binary at its top level. Empty for the package. |
+| `TREBUCHET_DIST` | The folder with the files of the build job: the package, the tarball where the target built one, and [what the build added](#files-the-build-adds). |
+| `TREBUCHET_TARGET`, `TREBUCHET_FORMAT`, `TREBUCHET_ARCH`, `TREBUCHET_VERSION` | As for the build command. |
+
+Three limits to know:
+
+- **The container is not quite empty.** `git` is installed before the package, for the checkouts, and with it the libraries git needs. A dependency on one of those is not noticed.
+- **The tarball is tested with the package installed.** The tarball declares no dependencies; the package brought the libraries.
+- **What the command installs, it installs for itself.** A tool the command needs, it installs after the checks that should notice a missing library.
+
+A file the command needs from the build, such as a test program compiled with it, reaches it through `TREBUCHET_DIST`, and so is uploaded with the package; with `release-tag` it would be attached to the release as well.
+
+`tests/fixture-app/smoke.sh` is such a command.
+
 ## A prebuilt folder
 
 For an app that is built elsewhere in the same run, such as a Flutter build. A job of the caller uploads the folder as an artifact; the call names it:
@@ -278,7 +309,7 @@ An input wins over a variable, and a variable over the table. An input that is p
 
 ## Testing a change
 
-`.github/workflows/linux-packages-test.yml` calls the workflow with the app under `tests/fixture-app`, once as a cargo build with every input and once as a prebuilt folder with the fewest. It runs when the workflow, its scripts, `targets.json` or the fixture change, and by hand from the Actions tab. It needs no secret and attaches nothing.
+`.github/workflows/linux-packages-test.yml` calls the workflow with the app under `tests/fixture-app`, once as a cargo build with every input and once as a prebuilt folder with the fewest. The cargo build adds a file to the uploaded folder in the tarball's job, and its smoke command checks that the file is there and in no other job. It runs when the workflow, its scripts, `targets.json` or the fixture change, and by hand from the Actions tab. It needs no secret and attaches nothing.
 
 The test names no runners, so in a fork it runs on GitHub's runners by the rule above, with nothing to set.
 

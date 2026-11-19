@@ -67,7 +67,7 @@ Not pursued: official Debian or Fedora inclusion (too much work for the crate co
 - Each matrix job runs in the target distro's official container image, which `targets.json` names for each target, on a Depot runner of the matching architecture, so every package links against that distro's own glibc, GTK and GStreamer. No cross-compiling, no emulation.
 - Rust apps: `cargo build --release`, then `cargo-deb` and `cargo-generate-rpm` with metadata from `Cargo.toml`. The same job also produces the tarball in the established layout (top-level folder, `share/applications`, `share/icons`), so Rick's tarball installer keeps working.
 - Prebuilt-artifact apps (flowcpt): the workflow takes a folder and wraps it with `nfpm` into deb and rpm. Runtime dependencies are declared per distro in the app's call.
-- Smoke test in every job: install the package in a fresh container of the same image, run the binary with `--version`, validate the desktop file with `desktop-file-validate` if present. On arm64 this is the only test until someone has hardware.
+- Smoke test in every job: install the package in a fresh container of the same image, run the binary with `--version`, validate the desktop file with `desktop-file-validate` if present. A call may name one more command, of the app's own, that runs there after the install and again for the unpacked tarball. On arm64 this is the only test until someone has hardware.
 
 ### 4.3 Plugins as packages
 
