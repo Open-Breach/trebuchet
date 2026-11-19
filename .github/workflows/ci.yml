@@ -1,0 +1,59 @@
+name: ci
+# On every push and every pull request: shellcheck on the scripts, actionlint
+# on the workflows, and the tests under tests/, which run the index scripts
+# against a fixture package. No secret is used anywhere in this workflow.
+#
+# Runners: Depot's when the repository belongs to Open-Breach, under the
+# label its other repositories use; GitHub's own for any other owner, so a
+# fork never waits for a runner it does not have. The repository variable
+# RUNNER_LINUX_X64 names another label in either case.
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+jobs:
+  # A branch of this repository with a pull request gets both events; the
+  # jobs run for the push and are skipped for the pull request. A pull
+  # request from a fork has no push event here, so there they run.
+  shellcheck:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ${{ vars.RUNNER_LINUX_X64 || (github.repository_owner == 'Open-Breach' && 'depot-ubuntu-24.04-8' || 'ubuntu-24.04') }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: shellcheck
+        run: |
+          command -v shellcheck > /dev/null || { sudo apt-get update && sudo apt-get install -y --no-install-recommends shellcheck; }
+          tests/lint-shell.sh
+
+  actionlint:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ${{ vars.RUNNER_LINUX_X64 || (github.repository_owner == 'Open-Breach' && 'depot-ubuntu-24.04-8' || 'ubuntu-24.04') }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: actionlint
+        run: tests/lint-workflows.sh
+
+  tests:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ${{ vars.RUNNER_LINUX_X64 || (github.repository_owner == 'Open-Breach' && 'depot-ubuntu-24.04-8' || 'ubuntu-24.04') }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends apt-utils createrepo-c rpm jq
+      - name: tests
+        run: tests/run.sh

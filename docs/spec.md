@@ -12,7 +12,7 @@ Not pursued: official Debian or Fedora inclusion (too much work for the crate co
 
 1. A separate public repository, `Open-Breach/trebuchet` ("Trebuchet"), holds the reusable build workflows and owns publishing. Apps build, the distribution repo publishes.
 2. All builds run in GitHub Actions on Depot runners, native x86-64 and arm64.
-3. Linux: tarball, deb and rpm on every tag, for Debian 12, Ubuntu 24.04 and Fedora 41, x86-64 and arm64. Published to Open-Breach's own apt and dnf repositories on an Open-Breach domain. Arch through the AUR only. NixOS through a `flake.nix` per repo. The distro versions are to be confirmed, see 4.1 and 11.
+3. Linux: tarball, deb and rpm on every tag, for the two newest Fedora releases, Debian stable and oldstable, and the two latest Ubuntu LTS releases, x86-64 and arm64. The current list is [`targets.json`](../targets.json). Published to Open-Breach's own apt and dnf repositories on an Open-Breach domain. Arch through the AUR only. NixOS through a `flake.nix` per repo.
 4. arm64 Linux builds ship from the start and are marked untested until someone reports otherwise.
 5. macOS: Apple Silicon only. Signed with Developer ID, notarised, stapled, shipped as a DMG and through an Open-Breach Homebrew tap. No Sparkle.
 6. Windows: unsigned for now. Inno Setup installer plus zip, published through winget. MSIX ruled out because it requires signing.
@@ -57,14 +57,14 @@ Not pursued: official Debian or Fedora inclusion (too much work for the crate co
 
 ### 4.1 Targets
 
-- Debian 12, Ubuntu 24.04, Fedora 41; x86-64 and arm64. Six build jobs per app.
-- To confirm before the first build: these versions were named on 2026-11-18 without checking their release status. See the first open item in 11.
-- Derivatives use the base distro's package: Mint 22, Pop!_OS, Zorin, elementary and KDE neon take the Ubuntu 24.04 package; LMDE takes Debian 12; Nobara and Ultramarine take the Fedora package.
-- New distro versions are added as a matrix entry when they ship; old ones are dropped when the distro drops them.
+- The targets follow a rule, not a fixed list: the two newest Fedora releases, Debian stable and oldstable, and the two latest Ubuntu LTS releases; x86-64 and arm64. Six targets, twelve build jobs per app. Decided 2026-11-19.
+- The current list is [`targets.json`](../targets.json), the one place the build matrix, the index scripts and the tests read.
+- Derivatives use the package of the release they are based on: Mint, Pop!_OS, Zorin, elementary and KDE neon take the package of their Ubuntu LTS base; LMDE takes that of its Debian base; Nobara and Ultramarine take the Fedora package of the same release. The install docs carry the table with the current releases.
+- A new release enters `targets.json` when it ships, and the release the rule no longer covers leaves it.
 
 ### 4.2 Build
 
-- Each matrix job runs in the target distro's official container image (`debian:12`, `ubuntu:24.04`, `fedora:41`) on a Depot runner of the matching architecture, so every package links against that distro's own glibc, GTK and GStreamer. No cross-compiling, no emulation.
+- Each matrix job runs in the target distro's official container image, which `targets.json` names for each target, on a Depot runner of the matching architecture, so every package links against that distro's own glibc, GTK and GStreamer. No cross-compiling, no emulation.
 - Rust apps: `cargo build --release`, then `cargo-deb` and `cargo-generate-rpm` with metadata from `Cargo.toml`. The same job also produces the tarball in the established layout (top-level folder, `share/applications`, `share/icons`), so Rick's tarball installer keeps working.
 - Prebuilt-artifact apps (flowcpt): the workflow takes a folder and wraps it with `nfpm` into deb and rpm. Runtime dependencies are declared per distro in the app's call.
 - Smoke test in every job: install the package in a fresh container of the same image, run the binary with `--version`, validate the desktop file with `desktop-file-validate` if present. On arm64 this is the only test until someone has hardware.
@@ -80,8 +80,8 @@ Not pursued: official Debian or Fedora inclusion (too much work for the crate co
 
 ### 4.4 Repositories
 
-- apt: one repository with one suite per base distro (`debian-12`, `ubuntu-24.04`), component `main`, both architectures in the same index. Signed `Release`/`InRelease` with the Open-Breach GPG key.
-- dnf: one repository per Fedora version with one directory per architecture, `repomd.xml` signed with the same key.
+- apt: one repository with one suite per Debian and Ubuntu target, named by the target's id in `targets.json`, component `main`, both architectures in the same index. Signed `Release`/`InRelease` with the Open-Breach GPG key.
+- dnf: one repository per Fedora target with one directory per architecture, `repomd.xml` signed with the same key.
 - Users add the repo once (the key goes in `/etc/apt/keyrings` or is imported by dnf) and then install, update and remove with their normal tools.
 - The pool holds every app and every plugin. Old versions are kept for the last three releases so downgrades work, then pruned by the publisher.
 
@@ -237,13 +237,12 @@ Not pursued: official Debian or Fedora inclusion (too much work for the crate co
 ## 10. Per-app notes
 
 - **Rick**: already ships tarballs for Linux x64 and arm64, macOS arm64 and Windows x64, and already has the tarball installer. Adds deb, rpm, AUR, flake, DMG with notarisation, Inno Setup, winget, and the plugin registry (7.3). Plugins split into packages as in 4.3. Rick's side of the registry — what fits, how a plugin is installed, when one is suggested — is `specs/plugin-distribution.md` in the Rick repository.
-- **Meeseeks**: Linux only. Keeps its tarball and README-as-release-notes workflow; adds deb, rpm, AUR and flake through the same reusable workflow. arm64 is new and untested. The Ubuntu 24.04 GTK 4.14 floor stays; Debian 12 ships GTK 4.8, so Meeseeks skips the Debian 12 target until the GTK floor allows it.
+- **Meeseeks**: Linux only. Keeps its tarball and README-as-release-notes workflow; adds deb, rpm, AUR and flake through the same reusable workflow. arm64 is new and untested. The GTK 4.14 floor stays: Meeseeks leaves out, with `exclude` in its call, every target in `targets.json` whose release ships an older GTK, until the floor is revisited or that release leaves the list.
 - **Gossip**: CLI first, so no desktop file or icon initially; the workflow treats those as optional. Gets deb, rpm, AUR, flake, Homebrew formula (not cask) and winget. When the GUI lands, the desktop entry and icon are added to the same call.
 - **flowcpt** (planned): Flutter desktop build, closed source, private repo. Calls the public reusable workflow with a prebuilt artifact folder; runtime dependencies (GTK 3 and the Flutter Linux stack) declared in the call; licence text shipped in the package instead of Apache-2.0. Not in the plugin registry.
 
 ## 11. Open items
 
-- Target distro versions (4.1), to settle before the first build. Checked 2026-11-18: Fedora 41 has been end-of-life since December 2025; Fedora 43 (until 1 December 2026), 44 and 45 are the supported releases. Debian 13 is the current stable and Debian 12 is in LTS until June 2028. Ubuntu 26.04 LTS exists alongside 24.04 LTS. Every version reference in 2, 4 and 10 follows this decision.
 - Whether the root `openbreach.dev` gets a project website later (the packages live under `get.openbreach.dev`).
 - Exact dnf repo layout for future Fedora versions (one repo per version versus `$releasever` substitution).
 - Whether the install script also handles AUR helpers on Arch or just points to the AUR page.
