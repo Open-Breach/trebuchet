@@ -1,0 +1,142 @@
+name: publish
+# The publisher: takes the packages of one app release from its GitHub
+# Release, adds them to the apt and dnf repositories, keeps the last three
+# versions of every package, rebuilds and signs every index, and syncs the
+# result to the bucket behind get.openbreach.dev (docs/spec.md, section 3).
+# How to run it and what to do when it fails: docs/publisher.md.
+#
+# Triggers:
+#   repository_dispatch, type `release`: sent by an app's release workflow,
+#     with client_payload { app, version, release_url }.
+#   workflow_dispatch: the same three values by hand, to repeat a publish;
+#     or none of them, to rebuild and sign the repositories as they are.
+#
+# Secrets, by name only: R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT,
+# GPG_PRIVATE_KEY, GPG_PASSPHRASE. Variables: R2_BUCKET, and RUNNER_LINUX_X64
+# for another runner than the default, which is Depot's for Open-Breach and
+# GitHub's own for any other owner of this repository. Each secret is given
+# to the one step that needs it, and no step prints one.
+on:
+  repository_dispatch:
+    types: [release]
+  workflow_dispatch:
+    inputs:
+      app:
+        description: "Package name, such as rick. Empty with the other two: republish only."
+        type: string
+        default: ""
+      version:
+        description: "Version, X.Y.Z"
+        type: string
+        default: ""
+      release-url:
+        description: "URL of the GitHub Release, https://github.com/<owner>/<repository>/releases/tag/<tag>"
+        type: string
+        default: ""
+
+# One publish at a time: two apps never rebuild the indexes at once. A
+# running publish is never cancelled, and `queue: max` lets every waiting
+# request keep its place, where the default would drop all but the newest.
+concurrency:
+  group: publish
+  cancel-in-progress: false
+  queue: max
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    # Only the workflow of the default branch publishes: a manual run from
+    # another branch would sign with that branch's scripts.
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ${{ vars.RUNNER_LINUX_X64 || (github.repository_owner == 'Open-Breach' && 'depot-ubuntu-24.04-8' || 'ubuntu-24.04') }}
+    timeout-minutes: 60
+    env:
+      SITE: ${{ github.workspace }}/.publish/site
+      INCOMING: ${{ github.workspace }}/.publish/incoming
+      REMOVED: ${{ github.workspace }}/.publish/removed
+      GNUPGHOME: ${{ github.workspace }}/.publish/gnupg
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The request is data from outside. It is checked here, and only what
+      # this step writes out is used further down.
+      - name: request
+        id: request
+        env:
+          PUBLISH_EVENT: ${{ github.event_name }}
+          PUBLISH_APP: ${{ github.event.client_payload.app || inputs.app }}
+          PUBLISH_VERSION: ${{ github.event.client_payload.version || inputs.version }}
+          PUBLISH_RELEASE_URL: ${{ github.event.client_payload.release_url || inputs.release-url }}
+        run: .github/scripts/publish/request.sh
+
+      - name: tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends apt-utils createrepo-c rpm jq gnupg
+          aws --version
+          gh --version | head -n 1
+
+      - name: fetch the release's packages
+        if: steps.request.outputs.mode == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLISH_REPOSITORY: ${{ steps.request.outputs.repository }}
+          PUBLISH_TAG: ${{ steps.request.outputs.tag }}
+          PUBLISH_APP: ${{ steps.request.outputs.app }}
+          PUBLISH_PACKAGE_VERSION: ${{ steps.request.outputs.package-version }}
+        run: .github/scripts/publish/fetch.sh "$INCOMING"
+
+      - name: mirror the pool from the bucket
+        env:
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: .github/scripts/publish/bucket.sh pull "$SITE"
+
+      - name: signing key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: .github/scripts/publish/import-key.sh keys/openbreach.gpg
+
+      - name: add, prune, index and sign
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          MODE: ${{ steps.request.outputs.mode }}
+        run: |
+          if [ "$MODE" = release ]; then
+            .github/scripts/publish/build-site.sh "$SITE" "$REMOVED" "$INCOMING"
+          else
+            .github/scripts/publish/build-site.sh "$SITE" "$REMOVED"
+          fi
+
+      # The key is gone before anything is sent anywhere.
+      - name: remove the signing key
+        if: always()
+        run: |
+          gpgconf --kill gpg-agent 2> /dev/null || true
+          rm -rf "$GNUPGHOME"
+
+      - name: sync to the bucket
+        env:
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: .github/scripts/publish/bucket.sh push "$SITE" "$REMOVED"
+
+      - name: summary
+        env:
+          MODE: ${{ steps.request.outputs.mode }}
+          PUBLISH_APP: ${{ steps.request.outputs.app }}
+          PUBLISH_PACKAGE_VERSION: ${{ steps.request.outputs.package-version }}
+        run: |
+          if [ "$MODE" = release ]; then
+            .github/scripts/publish/summary.sh "$SITE" "$REMOVED" "$INCOMING"
+          else
+            .github/scripts/publish/summary.sh "$SITE" "$REMOVED"
+          fi

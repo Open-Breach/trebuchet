@@ -22,6 +22,7 @@ Apps build, Trebuchet publishes.
 - [`docs/spec.md`](docs/spec.md) is the source of truth: decisions, pipelines per platform, the plugin registry, hosting and the release flow.
 - [`docs/install.md`](docs/install.md) is for users: how to install an app, by script or by hand, and on which distros.
 - [`docs/linux-packages.md`](docs/linux-packages.md) is for an app that wants its Linux packages built: how to call `linux-packages.yml` and what to bring.
+- [`docs/publisher.md`](docs/publisher.md) is for whoever runs the publisher: what starts it, its secrets, what it does to the bucket and what to do when a run fails.
 - [`docs/repositories.md`](docs/repositories.md) describes the apt and dnf repositories: the target list, the layout, the scripts and how to run the tests.
 - [`CLAUDE.md`](CLAUDE.md) holds the rules for agents and contributors working in this repo.
 
