@@ -87,7 +87,7 @@ The order is add, prune, build the index, sign. The publisher runs them in that 
 
 ## Old versions
 
-The three highest versions of every package stay, so a downgrade by one or two releases works; older files are deleted by the prune scripts. "Highest" is the package manager's own order, `dpkg --compare-versions` for deb and rpm's comparison of epoch, version and release for rpm. A pre-release `1.3.0~rc1` is older than `1.3.0` and counts as a version of its own.
+The three highest versions of every package stay, so a downgrade by one or two releases works; older files are deleted by the prune scripts. This is the rule of the package repositories only. The plugin registry is not pruned: it keeps the plugin files of every release ([`registry.md`](registry.md)). "Highest" is the package manager's own order, `dpkg --compare-versions` for deb and rpm's comparison of epoch, version and release for rpm. A pre-release `1.3.0~rc1` is older than `1.3.0` and counts as a version of its own.
 
 ## Signing
 

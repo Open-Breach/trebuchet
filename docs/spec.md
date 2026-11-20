@@ -42,7 +42,7 @@ Not pursued: official Debian or Fedora inclusion (too much work for the crate co
 
 - `.github/workflows/` — reusable workflows and the publisher.
 - `apt/`, `rpm/` — scripts that build indexes (`apt-ftparchive`, `createrepo_c`) and sign them.
-- `registry/` — the scripts that merge a release's plugins into the registry index, prune it and sign it. The index itself is not in the repository; it lives in the bucket (7.2).
+- `registry/` — the scripts that merge a release's plugins into the registry index, take a yanked release out of it, and sign it. The index itself is not in the repository; it lives in the bucket (7.2).
 - `install.sh` — one-line installer (see 4.5).
 - `keys/` — the public GPG key of the package repositories and the public key the registry index is signed with.
 - `docs/` — install instructions per platform.
@@ -214,10 +214,18 @@ A build attestation is a record, signed by GitHub and kept publicly with the rep
 }
 ```
 
-- **What the publisher does**, inside the same run and the same concurrency lock as the package repositories: for each manifest of the release it downloads the files the manifest names, checks size and SHA-256 against the manifest, uploads each file to `plugins/<app>/<app_version>/<file>` in the bucket, and adds a build to the index. A build that is already in the index under the same plugin, version and platform is left alone, so a publisher run can be repeated. A file that fails its check stops the run before anything is written.
-- **Pruning.** The index keeps the builds of the app's last three releases, like the package pool (4.4). Builds of older releases leave the index and their files leave the bucket. A release that is yanked is removed by a manual publisher run that names it.
-- A plugin that no later release carries leaves the index when its last build is pruned.
-- The index is written and signed last, after every file is in place, so a reader never sees an entry whose file is missing.
+- **What the publisher does**, inside the same run and the same concurrency lock as the package repositories: for each manifest of the release it downloads the files the manifest names, checks size and SHA-256 against the manifest, uploads each file to `plugins/<app>/<app_version>/<file>` in the bucket, and adds a build to the index. A file that fails its check stops the run before anything is written.
+- **A build that is already there is left alone**, so a publisher run can be repeated. A build is the same when the plugin, the plugin's own version, the app version and the platform are the same. The app version belongs to it: a plugin whose own version does not change from one release of the app to the next still has a build for each (7.3). This answers question 1 of issue 6, on 2026-11-20.
+- **Nothing is pruned.** The index keeps every build of every release, and the bucket keeps their files, so an app of any released version still finds its plugins. Decided on 2026-11-20; until then the rule was the last three releases. It is the registry's rule alone: the package pool keeps the last three versions of every package (4.4).
+- A plugin that no later release carries stays in the index, with the builds of the releases that carried it.
+- **Removing a release.** A release that is yanked is removed by a manual publisher run that names it. That is the only way a build leaves the index and a file leaves the bucket. A plugin whose last build leaves, leaves with it. Three things go with a removal (questions 2 and 3 of issue 6); `docs/publisher.md` has the steps:
+  - Where the release was the app's `latest` (7.6), `latest` is dropped with a warning, because the index does not know the release before it. Publishing the previous release again names it.
+  - The release's deb and rpm files stay in the apt and dnf repositories. A removal touches the registry only.
+  - The cure for a bad release is a new version with the fix. A removal takes the release back from nobody who has it.
+- **Order.** The plugin files go up first, then the index and its signature, so a reader never sees an entry whose file is missing. The files of a removed release are deleted last, after the new index is up, for the same reason (question 4).
+- **Caching.** The index and its signature are served with `Cache-Control: public, max-age=60` (question 5). They are two files, so for up to a minute after a publish a cache can serve the new index with the signature of the one before. A reader then refuses it and keeps the last index that verified.
+- **The switch.** The publisher keeps the registry, and takes plugin packages (4.3) into the repositories, only where the repository variable `PUBLISH_PLUGINS` is `true`. The variable stays after go-live (question 6): it is how a copy of this repository publishes its packages without a registry.
+- **What grows.** With nothing pruned, every release adds to the index and to the bucket for good: one build of about 400 bytes per plugin file, and the files. For Rick that is 38 builds and about 15 KB of index per release, and roughly 60 MB of files, of which only Linux x64 is measured (`docs/publisher.md`, *What grows*). A publisher run reads the index and never the files that are published already, so it does not slow down with it.
 
 ### 7.5 Signing
 
@@ -270,7 +278,6 @@ This section is the one place that names secrets; the apps' specs point here and
 - Whether the install script also handles AUR helpers on Arch or just points to the AUR page.
 - Meeseeks on Debian 12 once a GTK floor decision is revisited.
 - Listing plugins that are not built in Rick's workspace (7.1). Needs a plugin boundary in Rick that survives a Rick release: a stable ABI or the WASM host.
-- Whether the registry keeps more than the last three releases of an app's plugins (7.4), for users who stay on an old Rick.
 - Whether an install through the AUR, the Homebrew cask or winget counts as packaged for the update notice (7.6). Today it does not: none of them carries the `package` file, so the notice links to the release page.
 
 ## 12. Next steps
@@ -281,6 +288,6 @@ This section is the one place that names secrets; the apps' specs point here and
 4. Add the AUR, Homebrew and winget publish steps.
 5. Add the macOS and Windows reusable workflows for Rick.
 6. Add `flake.nix` to each Rust repo.
-7. Add the plugin registry: the publisher's side here (7.4, 7.5) and the plugin packages (4.3); Rick's side in the Rick repository.
+7. Add the plugin registry: the publisher's side here (7.4, 7.5) and the plugin packages (4.3); Rick's side in the Rick repository. Built 2026-11-20 and switched off (issue 6): the registry scripts, the registry's steps in the publisher, and the plugin packages in `linux-packages.yml`; Rick's release names its nine Linux plugins as packages (Open-Breach/rick#302, in Rick's `dev`). The registry's key is proven: the workflow *registry key* signs a throwaway file with the two secrets and verifies it against `keys/registry.pub`. A dry run with a test key and a local server showed a list that Rick's client accepts, an `.rkp` it installs, a `rick-plugin-<id>` package that installs in a clean container, and a tampered list that is refused. Remaining: Serge's go, which is the repository variable `PUBLISH_PLUGINS` set to `true`; the first index then comes with the publisher's first run (step 3). Still open in issue 6: the dependencies of plugin packages, a dropped plugin's versions in the pool, and the AUR, Homebrew and winget installs (section 11).
 8. Done 2026-11-20: the attest step in `linux-packages.yml`, with the two permissions in its documented call and the skip for a private caller (section 3, *Build attestations*).
 9. Done 2026-11-18: domain, bucket, custom domain and token. Remaining: put the token into Trebuchet's secrets.

@@ -7,8 +7,9 @@ name: publish
 #
 # In the same run it keeps the plugin registry (docs/registry.md): it writes
 # the app's latest version into the registry's index, adds the plugins the
-# release attached, keeps those of the last three releases, signs the index
-# and uploads the plugin files and then the index. This part runs only where
+# release attached, signs the index and uploads the plugin files and then
+# the index. The registry keeps the plugins of every release: nothing is
+# pruned there, unlike in the package repositories. This part runs only where
 # the repository variable PUBLISH_PLUGINS is `true`; without it nothing of
 # the registry is fetched, signed or uploaded, and an app's plugin packages
 # (docs/spec.md 4.3) stay on its release: only the app's own packages go
@@ -178,7 +179,7 @@ jobs:
       # that is not what its manifest says stops the run here, with the
       # bucket untouched. The registry's key exists as a file only inside
       # the script that signs.
-      - name: "registry: merge, prune and sign"
+      - name: "registry: merge and sign"
         if: steps.request.outputs.mode != 'republish' && env.PUBLISH_PLUGINS == 'true'
         env:
           REGISTRY_SIGNING_KEY: ${{ secrets.REGISTRY_SIGNING_KEY }}

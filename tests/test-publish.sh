@@ -7,9 +7,12 @@
 #
 # Every release carries plugins, so every run also keeps the plugin
 # registry: the index of the bucket is verified, the release is merged into
-# it, the index is pruned and signed, and the plugin files and the index go
-# up. What the bucket then serves is read the way an app reads it, and a
-# list or a file that was tampered with is refused.
+# it, the index is signed, and the plugin files and the index go up. The
+# registry keeps the plugins of every release, where the package pool keeps
+# the last three versions: after four releases the first one's packages are
+# gone and its plugins are served. What the bucket then serves is read the
+# way an app reads it, and a list or a file that was tampered with is
+# refused.
 #
 # The signing keys are throwaways generated here. The GPG key reaches the
 # scripts the way the real one does: as an armoured export in
@@ -204,8 +207,13 @@ plugin_modified="$(s3api s3api head-object --bucket "$R2_BUCKET" --key "$old_plu
 sleep 1
 publish 3 1.2.0
 [ ! -s "$work/run-3/removed" ] || fail "three versions and something was pruned"
-[ ! -s "$work/run-3/registry-removed" ] || fail "three releases and a plugin file was pruned"
 publish 4 1.3.0
+# The fourth release prunes the first one's packages, and nothing of the
+# registry: no release ever takes a plugin file away.
+[ -s "$work/run-4/removed" ] || fail "four versions and no package was pruned"
+for run in 1 2 3 4; do
+  [ ! -s "$work/run-$run/registry-removed" ] || fail "run $run: a release took plugin files out of the registry: $(cat "$work/run-$run/registry-removed")"
+done
 echo "-- four releases published"
 
 # A package that was not touched is not uploaded again, and neither is a
@@ -244,19 +252,26 @@ done
 for file in install.sh keys/openbreach.gpg keys/openbreach.asc; do
   grep -qx "$file" <<< "$files" || fail "no $file in the bucket"
 done
-# The registry: the index with its signature, and the plugin files of the
-# last three releases and no others.
+# The registry: the index with its signature, and the plugin files of all
+# four releases. 1.0.0 is among them, whose packages were pruned above: an
+# app of any released version still finds its plugins.
 for file in registry/index.json registry/index.json.minisig; do
   grep -qx "$file" <<< "$files" || fail "no $file in the bucket"
 done
 expected_plugins=""
-for version in 1.1.0 1.2.0 1.3.0; do
+for version in 1.0.0 1.1.0 1.2.0 1.3.0; do
   for file in "alpha-$version-linux-x64.plugin" "alpha-$version-macos-arm64.plugin" "beta-$version-linux-x64.plugin"; do
     expected_plugins+="plugins/trebuchet-fixture/$version/$file"$'\n'
   done
 done
 [ "$(grep '^plugins/' <<< "$files")" = "${expected_plugins%$'\n'}" ] \
   || fail "unexpected plugin files in the bucket: $(grep '^plugins/' <<< "$files")"
+# And the index names every one of them: twelve builds of four releases.
+[ "$(bucket_index | jq -r '[.apps["trebuchet-fixture"].plugins[].builds[].app_version] | unique | join(" ")')" = "1.0.0 1.1.0 1.2.0 1.3.0" ] \
+  || fail "the index does not hold the builds of all four releases"
+[ "$(bucket_index | jq '[.apps["trebuchet-fixture"].plugins[].builds[]] | length')" -eq 12 ] || fail "expected twelve builds in the index"
+[ "$(bucket_index | jq -r '.apps["trebuchet-fixture"].plugins[].builds[].url' | sed "s|^$url/||" | sort)" = "${expected_plugins%$'\n'}" ] \
+  || fail "the index does not name exactly the plugin files of the bucket"
 # Nothing but the site is in the bucket.
 stray="$(grep -v -E '^(apt/|rpm/|plugins/|registry/index\.json(\.minisig)?$|keys/openbreach\.(gpg|asc)$|install\.sh$)' <<< "$files" || true)"
 [ -z "$stray" ] || fail "unexpected objects in the bucket: $stray"
@@ -285,7 +300,7 @@ cmp -s "$repo_root/install.sh" <(s3api s3 cp "s3://$R2_BUCKET/install.sh" -) || 
 for form in gpg asc; do
   cmp -s "$work/origin/public.$form" <(s3api s3 cp "s3://$R2_BUCKET/keys/openbreach.$form" -) || fail "keys/openbreach.$form in the bucket is not the published key"
 done
-echo "-- the bucket holds the last three versions, fresh indexes and nothing else"
+echo "-- the bucket holds the last three versions of every package, the plugins of every release, fresh indexes and nothing else"
 
 # A key whose two files have drifted apart is not published.
 mkdir "$work/drifted"
@@ -387,11 +402,14 @@ registry_ok plain release trebuchet-plain 0.3.1 https://github.com/Open-Breach/t
 
 # A release that was yanked: a manual run takes it out, and its files with it.
 registry_ok remove remove trebuchet-fixture 1.2.0
-[ "$(bucket_index | jq -r '[.apps["trebuchet-fixture"].plugins[].builds[].app_version] | unique | join(" ")')" = "1.1.0 1.3.0" ] \
-  || fail "the removed release is still in the index"
+[ "$(bucket_index | jq -r '[.apps["trebuchet-fixture"].plugins[].builds[].app_version] | unique | join(" ")')" = "1.0.0 1.1.0 1.3.0" ] \
+  || fail "the removed release is still in the index, or another one left with it"
+[ "$(sort "$work/run-remove/registry-removed")" = "$(grep '^plugins/trebuchet-fixture/1\.2\.0/' <<< "$plugins_before")" ] \
+  || fail "unexpected files to delete: $(cat "$work/run-remove/registry-removed")"
 now="$(listing)"
 ! grep -q '^plugins/trebuchet-fixture/1\.2\.0/' <<< "$now" || fail "the removed release's files are still in the bucket"
-[ "$(listing | grep -c '^plugins/trebuchet-fixture/')" -eq 6 ] || fail "the removal took more than the release's files"
+[ "$(grep '^plugins/' <<< "$now")" = "$(grep -v '^plugins/trebuchet-fixture/1\.2\.0/' <<< "$plugins_before")" ] \
+  || fail "the removal took more than the release's files"
 [ "$(bucket_index | jq -r '.apps["trebuchet-fixture"].latest.version')" = "1.3.0" ] || fail "the removal changed latest"
 # What it would not delete: a path that is no plugin file of the registry.
 for path in "apt/pool/debian-12/x.deb" "plugins/../install.sh" "plugins/a/b" "registry/index.json" "plugins/a/1.0.0/sub/x"; do
@@ -512,9 +530,12 @@ done
 
 check="$repo_root/registry/check.sh"
 out="$("$check" "$url")" || fail "the registry the bucket serves does not check out"
-grep -qF "9 file(s) downloaded, each with the size and the SHA-256 the index names" <<< "$out" || fail "unexpected result of the check: $out"
+grep -qF "12 file(s) downloaded, each with the size and the SHA-256 the index names" <<< "$out" || fail "unexpected result of the check: $out"
 grep -qF "trebuchet-plain: latest 0.3.1, 0 build(s)" <<< "$out" || fail "the app without plugins is not in the check: $out"
 TREBUCHET_REGISTRY_FRESH=1 "$check" "$url" trebuchet-fixture 1.5.0 | grep -qF "3 file(s) downloaded" || fail "the check of one release"
+# The first release, four releases later: its plugins are still served, as
+# the index says they are.
+"$check" "$url" trebuchet-fixture 1.0.0 | grep -qF "3 file(s) downloaded" || fail "the first release's plugins are no longer served"
 "$check" --index "$url" > /dev/null || fail "the check of the index alone"
 # By hand, as docs/registry.md says.
 minisign -Vm "$work/served/registry/index.json" -p "$work/registry.pub" > /dev/null || fail "minisign -Vm does not verify the served index"
@@ -546,7 +567,7 @@ cp "$work/served-index.json.minisig" "$work/served/registry/index.json.minisig"
 "$check" --index "$url" > /dev/null || fail "the restored index does not verify"
 # A plugin file that is not the one the signed index describes.
 echo "one more line" >> "$work/served/plugins/trebuchet-fixture/1.5.0/alpha-1.5.0-linux-x64.plugin"
-refused_by_reader "1 of 9 file(s) are not what the index says" "a plugin file that was changed"
+refused_by_reader "1 of 12 file(s) are not what the index says" "a plugin file that was changed"
 rm "$work/served/plugins/trebuchet-fixture/1.5.0/alpha-1.5.0-linux-x64.plugin"
 refused_by_reader "does not download" "an index that names a missing file"
 echo "-- the served registry verifies; a tampered list and a changed file are refused"

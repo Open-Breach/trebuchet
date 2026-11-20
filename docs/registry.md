@@ -94,8 +94,12 @@ A file that is not on the release, or that has another size or another SHA-256 t
 
 - **A build that is already in the list is left alone.** A build is the same when plugin, plugin version, app version and platform are the same. Publishing a release twice changes nothing but `generated`.
 - A published file never changes. Where a release is published again with another file under the same name, the list keeps the build it has and the run says so with a warning. To replace it, the release is removed and published again.
-- **The last three releases stay.** The builds of an app's older releases leave the list, and their files leave the bucket. A release is known by its builds. A plugin whose last build leaves, leaves with it.
-- **A release that was yanked** is removed by name. Its builds and files go. If it was the app's `latest`, `latest` goes too: the list does not know the release before it. Publishing that release again names it.
+- **Every release stays.** The list keeps the builds of every release of an app, and the bucket keeps their files, so an app of any released version still finds the plugins that were built for it. Nothing is pruned here. That is the registry's rule alone: the apt and dnf repositories keep the last three versions of a package ([`repositories.md`](repositories.md)).
+- A release that is published late, after a newer one, is added where its version belongs. It does not become `latest`, and it does not give a plugin its name or description.
+- A plugin that later releases no longer carry stays in the list, with the builds of the releases that carried it and the name, description and `meta` of the newest of them.
+- **A release that was yanked** is removed by name, and that is the only way a build leaves the list and a file leaves the bucket. Its builds and files go. A release is known by its builds. A plugin whose last build leaves, leaves with it. If the release was the app's `latest`, `latest` goes too: the list does not know the release before it. Publishing that release again names it. [`publisher.md`](publisher.md#removing-a-release) has the steps, and what a removal does not do.
+
+What this adds to the list and to the bucket with every release is in [`publisher.md`](publisher.md#what-grows).
 
 ## Verifying the list
 
@@ -134,15 +138,16 @@ All in `registry/`. They need `jq`; `sign.sh` needs `minisign` 0.10 or newer. `S
 | Script | Does |
 | --- | --- |
 | `merge.sh SITE APP VERSION RELEASE_URL [INCOMING_DIR]` | Merges one release into the list. Checks every file the manifests in `INCOMING_DIR` name, adds the builds that are new, copies their files to `SITE/plugins/<app>/<version>/` and writes `latest`. Without `INCOMING_DIR`, or without a manifest in it, only `latest`. |
-| `prune.sh SITE REMOVED_LIST [KEEP]` | Keeps the builds of every app's `KEEP` newest releases, default 3. Appends the paths of the files that left to `REMOVED_LIST`. |
 | `remove.sh SITE REMOVED_LIST APP VERSION` | Takes one release out of the list. Appends the paths of its files to `REMOVED_LIST`. A release the list has nothing of is an error. |
 | `sign.sh FILE` | Signs with the key of the secrets `REGISTRY_SIGNING_KEY` and `REGISTRY_SIGNING_PASSWORD`, writes `FILE.minisig`, and checks the signature against `keys/registry.pub`. |
 | `check.sh [--index] BASE_URL [APP [VERSION]]` | Reads a registry as an app does: fetches the list and its signature, verifies them against `keys/registry.pub`, downloads the files the list names and compares each with its size and SHA-256. Changes nothing. |
 
 `merge.sh` reads two settings from the environment: `REGISTRY_BASE_URL`, the address `SITE` is served at, by default `https://get.openbreach.dev`; and `REGISTRY_PUBLISHER`, by default the owner of the repository the workflow runs in.
 
+No script prunes: `merge.sh` only adds, and `remove.sh` is the one that takes anything out.
+
 A script that fails leaves the list as it was. A path in `REMOVED_LIST` is always a file inside `plugins/<app>/<version>/` of the build it belonged to; a build whose address points anywhere else stops the script, and nothing is named for deletion.
 
 ## Testing a change
 
-`tests/test-registry.sh` runs the scripts on releases of a made-up app, which `tests/fixture/plugins.sh` writes: a first release, the same release again, a fourth release that prunes the first, files and manifests that are wrong, an app without plugins, and a release that is removed. It signs with a throwaway key made in the test and verifies with `minisign`. `tests/test-registry-key.sh` covers `sign.sh`. `tests/test-publish.sh` runs the publisher's steps against a bucket on the same machine and reads the result with `check.sh`. None of them uses the real key.
+`tests/test-registry.sh` runs the scripts on releases of a made-up app, which `tests/fixture/plugins.sh` writes: a first release, the same release again, more releases with the first one still there, a release that comes late, a plugin that later releases drop, files and manifests that are wrong, an app without plugins, and releases that are removed. It signs with a throwaway key made in the test and verifies with `minisign`. `tests/test-registry-key.sh` covers `sign.sh`. `tests/test-publish.sh` runs the publisher's steps against a bucket on the same machine and reads the result with `check.sh`: after four releases the first one's packages are pruned from the repositories, and its plugins are still listed and served. None of them uses the real key.
