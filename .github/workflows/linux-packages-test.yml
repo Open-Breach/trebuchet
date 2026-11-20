@@ -58,6 +58,9 @@ jobs:
   # the smoke command looks for it there and nowhere else. Every build also
   # puts a file aside for the smoke test only, and the smoke command looks
   # for it in the test's folder and not among the files for the release.
+  # Two plugins are packages of their own, the second with a dependency of
+  # its own: the smoke test installs them on top of the main package, and
+  # the smoke command finds them in their folders.
   cargo:
     needs: notice
     uses: ./.github/workflows/linux-packages.yml
@@ -84,6 +87,15 @@ jobs:
           "ubuntu-24.04": ["bash (>= 5)"],
           "fedora": ["bash >= 4", "coreutils"]
         }
+      plugins-dir: /usr/lib/trebuchet-fixture/plugins
+      plugins: |
+        [
+          { "id": "hello", "summary": "The fixture's first plugin", "files": "target/release/plugins/hello" },
+          {
+            "id": "extra", "summary": "The fixture's second plugin", "files": "target/release/plugins/extra",
+            "runtime-deps": { "debian": ["sed (>= 4)"], "ubuntu-24.04": ["grep"], "fedora": ["sed >= 4"] }
+          }
+        ]
 
   # What a release would get: the artifacts gathered by the name the
   # workflow's own release job gathers them by, as does a caller that writes
@@ -115,6 +127,23 @@ jobs:
             exit 1
           fi
           echo "only packages, tarballs and the builds' added files"
+          # Beside every main package, the two plugin packages and the meta
+          # package of the same build: four files per build.
+          for kind in deb rpm; do
+            main="$(find gathered -name "trebuchet-fixture[_-]1.2.3[_-]*.$kind" | wc -l)"
+            for name in trebuchet-fixture-plugin-hello trebuchet-fixture-plugin-extra trebuchet-fixture-plugins; do
+              found="$(find gathered -name "${name}[_-]1.2.3[_-]*.$kind" | wc -l)"
+              if [ "$main" -eq 0 ] || [ "$found" -ne "$main" ]; then
+                echo "::error::$found $kind file(s) of $name for $main of trebuchet-fixture"
+                exit 1
+              fi
+            done
+            if [ "$(find gathered -name "*.$kind" | wc -l)" -ne $((main * 4)) ]; then
+              echo "::error::more $kind files than the main, the plugin and the meta packages"
+              exit 1
+            fi
+          done
+          echo "every build's plugin packages are among them"
 
   # The folder a prebuilt app brings: here a shell script that prints the
   # version, with a data file beside it. Uploaded as plain files, so it

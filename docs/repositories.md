@@ -66,6 +66,8 @@ The packages keep the names `linux-packages.yml` gives them, from the GitHub Rel
 
 The target in the name is how a file finds its suite or repository. The architecture is read from the package itself.
 
+An app's plugin packages are named the same way, with their own package names: `rick-plugin-git_1.2.3_ubuntu-24.04_amd64.deb`, and `rick-plugins_…` for the meta package that depends on all of them ([`linux-packages.md`](linux-packages.md), *Plugins as packages*). In the pool they are packages like any other. Each depends on the app in exactly its own version, and both are pruned to their last three versions, so a plugin package always has its app beside it.
+
 ## Scripts
 
 All of them take the root directory of a local copy of the repository and read `targets.json`. They need `jq`; the apt scripts need `dpkg-deb` and `apt-ftparchive` (package `apt-utils`), the rpm scripts `rpm` and `createrepo_c`.

@@ -11,6 +11,12 @@ name: linux-packages
 # folder, from a build to its own smoke test and no further: they are never
 # attested and never reach a release.
 #
+# An app with plugins names the ones that are packages of their own: each
+# becomes <app>-plugin-<id>, from the same build, pinned to the exact
+# version of the main package, with a meta package <app>-plugins for all of
+# them (docs/spec.md 4.3). They are tested, uploaded, attested and attached
+# with the main package.
+#
 # How to call it, and what the app has to bring: docs/linux-packages.md.
 #
 # Runners: the jobs run in the calling repository, and its owner decides.
@@ -90,6 +96,14 @@ on:
         description: "build: cargo only. A folder the build lays out, with the binary at its top level and what belongs beside it; the tarball is made from it. Default: the binary alone."
         type: string
         default: ""
+      plugins:
+        description: 'build: cargo only. Plugins that become packages of their own, <app>-plugin-<id>, from the same build, as a JSON list: [{"id": "git", "summary": "Git for the app", "files": "target/release/plugins/git"}]. files is the folder the build lays out for the plugin; an entry may add runtime-deps, in the shape of the input of that name. A meta package <app>-plugins depends on all of them. Default: none.'
+        type: string
+        default: "[]"
+      plugins-dir:
+        description: "With plugins: the directory the installed app looks for its plugins in, such as /usr/lib/rick/plugins. A plugin is installed as the folder of its id in it."
+        type: string
+        default: ""
       smoke-command:
         description: "A command of the app's for the smoke test, run with bash in working-directory of a checkout of the calling repository: once after the package is installed in the fresh container, and once more for the unpacked tarball where the target built one. Default: none."
         type: string
@@ -129,6 +143,8 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix }}
       binary: ${{ steps.plan.outputs.binary }}
       package-version: ${{ steps.plan.outputs.package-version }}
+      plugins: ${{ steps.plan.outputs.plugins }}
+      plugin-ids: ${{ steps.plan.outputs.plugin-ids }}
     steps:
       # The scripts and targets.json come from the commit of this workflow
       # file, not from the calling repository and not from a branch name.
@@ -164,6 +180,8 @@ jobs:
           TREBUCHET_BUILD_DEPS: ${{ inputs.build-deps }}
           TREBUCHET_RUNNER_X64: ${{ inputs.runner-x64 }}
           TREBUCHET_RUNNER_ARM64: ${{ inputs.runner-arm64 }}
+          TREBUCHET_PLUGINS: ${{ inputs.plugins }}
+          TREBUCHET_PLUGINS_DIR: ${{ inputs.plugins-dir }}
         run: |
           .trebuchet/.github/scripts/linux-packages/plan.sh
 
@@ -279,6 +297,7 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
         env:
           TREBUCHET_BUILD_DEPS: ${{ matrix.build_deps }}
+          TREBUCHET_PLUGINS: ${{ needs.plan.outputs.plugins }}
         run: |
           "$SCRIPTS/prepare.sh"
       # Files an earlier job of the caller made, put where its build command
@@ -309,6 +328,17 @@ jobs:
           TREBUCHET_ICON: ${{ inputs.icon }}
         run: |
           "$SCRIPTS/package.sh"
+      # The plugins the call names, each a package of its own from this same
+      # build, and the meta package for all of them.
+      - name: plugin packages
+        if: needs.plan.outputs.plugins != '[]'
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          TREBUCHET_PLUGINS: ${{ needs.plan.outputs.plugins }}
+          TREBUCHET_PLUGINS_DIR: ${{ inputs.plugins-dir }}
+          TREBUCHET_CARGO_PACKAGE: ${{ inputs.cargo-package }}
+        run: |
+          "$SCRIPTS/plugins.sh"
       - name: tarball
         if: matrix.tarball
         working-directory: ${{ inputs.working-directory }}
@@ -361,6 +391,8 @@ jobs:
       TREBUCHET_FORMAT: ${{ matrix.format }}
       TREBUCHET_ARCH: ${{ matrix.arch }}
       TREBUCHET_DESKTOP_FILE: ${{ inputs.desktop-file }}
+      TREBUCHET_PLUGIN_IDS: ${{ needs.plan.outputs.plugin-ids }}
+      TREBUCHET_PLUGINS_DIR: ${{ inputs.plugins-dir }}
     steps:
       # git for the checkouts, and nothing else before the package: what is
       # installed here cannot be missed by the test. The paths are set from

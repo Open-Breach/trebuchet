@@ -7,9 +7,9 @@ The reusable workflow an app calls from its release workflow to get its Linux pa
 For every target in [`targets.json`](../targets.json) and for x86-64 and arm64:
 
 1. **Build**, inside the target's official container image on a runner of the matching architecture. No cross-compiling, no emulation: the package links against that distro's own libraries.
-2. **Package**: a `.deb` or an `.rpm`.
+2. **Package**: a `.deb` or an `.rpm`. An app with plugins also gets [a package for each plugin](#plugins-as-packages) the call names, from the same build.
 3. **Tarball**: one target per architecture also makes `<app>-<version>-linux-<arch>.tar.gz` in the established layout.
-4. **Smoke test**, in a fresh container of the same image: install the package with `apt` or `dnf`, run `<binary> --version`, validate the desktop entry with `desktop-file-validate`. The tarball is unpacked and tested the same way. An app can add [checks of its own](#a-smoke-test-of-the-apps-own).
+4. **Smoke test**, in a fresh container of the same image: install the package with `apt` or `dnf`, run `<binary> --version`, validate the desktop entry with `desktop-file-validate`. The tarball is unpacked and tested the same way, and the plugin packages are installed on top. An app can add [checks of its own](#a-smoke-test-of-the-apps-own).
 5. **Upload** everything as artifacts of the run, with [what the build added](#files-the-build-adds).
 6. **Attest and attach**, if the call names a release and every smoke test passed: every one of those files gets a [build attestation](#build-attestations) and is attached to that GitHub Release of the calling repository. Files a build put aside [for its smoke test only](#files-for-the-smoke-test-only) are not among them.
 
@@ -63,6 +63,8 @@ jobs:
 | `build-artifact` | cargo | none | Name of an artifact of the same run that the build needs, downloaded before `build-command`. See [Files from an earlier job](#files-from-an-earlier-job). |
 | `build-artifact-path` | cargo | `.` | Where `build-artifact` is put, relative to `working-directory`. |
 | `cargo-package` | cargo | `app` | The crate that carries the packaging metadata, when the repository is a workspace and the crate is not named like the package. |
+| `plugins` | cargo | none | The plugins that become packages of their own, as a JSON list. See [Plugins as packages](#plugins-as-packages). |
+| `plugins-dir` | cargo | none | With `plugins`: the directory the installed app looks for its plugins in, such as `/usr/lib/rick/plugins`. |
 | `smoke-command` | both | none | A command of the app's that the smoke test runs as well, with bash in `working-directory`. See [A smoke test of the app's own](#a-smoke-test-of-the-apps-own). |
 | `bundle-dir` | cargo | none | A folder the build lays out, with the binary at its top level and what belongs beside it. The tarball is made from it. Without it the binary alone is the bundle. |
 | `working-directory` | both | `.` | Directory of the app in the calling repository. The other paths are relative to it. |
@@ -150,7 +152,7 @@ This is the folder for the release: every file in it is a release file. A file t
 - **Files that belong to one build.** Some files fit the build they were made with and no other, such as add-ons compiled against it. The tarball is such a build's output too, so they are added where `TREBUCHET_TARBALL` is `true`: once per architecture, from the same build as the tarball.
 - **Names.** The files of every job end up side by side, in the release or wherever the caller gathers the artifacts. A name therefore says what the tarball's name says, the version and the architecture, or it is overwritten by its namesake from another job.
 - **Plain files, at the top of the folder.** A folder inside it cannot be attached to a release.
-- **No second package or tarball.** The smoke test expects one `.deb` or `.rpm` in the folder, and at most one `.tar.gz`.
+- **No package or tarball of the build's own.** The smoke test expects the package, the [plugin packages](#plugins-as-packages) the call names and no other `.deb` or `.rpm` in the folder, and at most one `.tar.gz`.
 
 ```bash
 if [ "$TREBUCHET_TARBALL" = true ]; then
@@ -205,6 +207,51 @@ The files land in `working-directory`, or in the folder under it that `build-art
 
 A prebuilt folder needs none of this: it is an artifact already and brings its files itself.
 
+## Plugins as packages
+
+An app with plugins can split into several packages from one build (spec, 4.3). The main package carries the binary and the plugins the app counts as part of every install. Every other plugin becomes a package of its own, `<app>-plugin-<id>`, which a user installs by name. Which plugins those are is the app's decision, and the call names them:
+
+```yaml
+    with:
+      app: rick
+      version: 1.2.3
+      plugins-dir: /usr/lib/rick/plugins
+      plugins: |
+        [
+          { "id": "git", "summary": "Git status and actions for Rick", "files": "target/release/plugin-packages/git" },
+          {
+            "id": "zfs", "summary": "ZFS datasets and snapshots for Rick", "files": "target/release/plugin-packages/zfs",
+            "runtime-deps": { "debian": ["zfsutils-linux"], "ubuntu": ["zfsutils-linux"] }
+          }
+        ]
+```
+
+| Key | Meaning |
+| --- | --- |
+| `id` | The plugin's id. The package is named `<app>-plugin-<id>`, so: lowercase letters, digits, `+`, `-`, `.`. |
+| `summary` | One line: the package's description as `apt show` and `dnf info` print it. |
+| `files` | The folder the build lays out for the plugin, relative to `working-directory`. It is installed whole as `<plugins-dir>/<id>/`. |
+| `runtime-deps` | Optional. What this plugin needs beyond the app, per distro or target, [in the shape of the input of that name](#dependencies-per-distro). |
+
+What comes of it, in every build job:
+
+- **One package per plugin**, a `.deb` or an `.rpm`, made with [`nfpm`](https://nfpm.goreleaser.com) from the folder as the build left it. A file that can be run is installed with mode 755, every other with 644. The package owns its folder, so removing it leaves nothing behind.
+- **Pinned to the app.** Each plugin package depends on the main package in exactly the version of the call, `Depends: rick (= 1.2.3)` or `Requires: rick = 1.2.3`. A plugin is built with one build of the app and fits no other; the package manager keeps the two together, installs the app with a plugin, moves both in an upgrade and refuses a plugin of another version.
+- **A meta package, `<app>-plugins`**, that depends on every plugin package in the same version and holds no file.
+- **Maintainer, licence and home page** are the main package's: from `package.metadata.deb.maintainer` or the first author, `license`, and `homepage` or `repository` of the crate that carries the packaging metadata.
+
+What the app has to do:
+
+- **Lay the folders out in the build command**, in every job, not only where the build is also the tarball: every target gets its own plugin packages, linked against its own libraries.
+- **Keep them out of the main package.** A plugin's folder belongs to its package alone. The smoke test fails when the main package already installs `<plugins-dir>/<id>`.
+- **No symbolic links** in a plugin's folder.
+
+The packages are named like the main one and travel with it: into the job's artifact, through the smoke test, and with `release-tag` onto the release, attested. The publisher puts them into the same repositories, once plugins are switched on there ([`publisher.md`](publisher.md)).
+
+A plugin package is for an install from a deb or an rpm. An app that also offers its plugins as downloads for its archives attaches those files itself ([Files the build adds](#files-the-build-adds), and [`registry.md`](registry.md)).
+
+`plugins` is for a cargo build. A prebuilt folder is one package.
+
 ## A smoke test of the app's own
 
 The workflow's smoke test knows what every app has: a package that installs, a binary that answers `--version`, a desktop entry. What only the app knows, that its plugins load or that it opens a file, goes into a command of the app's, named in `smoke-command`:
@@ -216,11 +263,11 @@ The workflow's smoke test knows what every app has: a package that installs, a b
       smoke-command: .github/scripts/linux-smoke.sh
 ```
 
-It runs with bash, as root, in the fresh container of the target's image, in `working-directory` of a checkout of the calling repository. It runs after the package is installed with nothing but its declared dependencies, and before anything else is installed, so a library the package forgot to ask for fails the command the way it would fail on a user's machine. Where the target also built the tarball, the command runs a second time for the unpacked tarball. A command that fails fails the job, and nothing is attached to a release.
+It runs with bash, as root, in the fresh container of the target's image, in `working-directory` of a checkout of the calling repository. It runs after the package is installed with nothing but its declared dependencies, and before anything else is installed, so a library the package forgot to ask for fails the command the way it would fail on a user's machine. Where the target also built the tarball, the command runs a second time for the unpacked tarball. Where the call names [plugins](#plugins-as-packages), it runs once more at the end, after their packages are installed on top of the main one: that is where an app checks that its plugins load from where the packages put them. A command that fails fails the job, and nothing is attached to a release.
 
 | Variable | Meaning |
 | --- | --- |
-| `TREBUCHET_SMOKE` | `package`: the package is installed and the binary is on the `PATH`. `tarball`: the tarball is unpacked. |
+| `TREBUCHET_SMOKE` | `package`: the package is installed and the binary is on the `PATH`. `tarball`: the tarball is unpacked. `plugins`: the plugin packages are installed as well; only for a call that names plugins. |
 | `TREBUCHET_SMOKE_DIR` | For the tarball, the unpacked folder with the binary at its top level. Empty for the package. |
 | `TREBUCHET_DIST` | The build job's folder for the release: the package, the tarball where the target built one, and [what the build added](#files-the-build-adds). |
 | `TREBUCHET_SMOKE_FILES` | The build job's folder [for this test only](#files-for-the-smoke-test-only). Empty where the build put nothing there. |
@@ -278,6 +325,8 @@ One artifact per target and architecture, named `linux_<app>_<target>_<arch>`, w
 | deb | `rick_1.2.3_ubuntu-24.04_amd64.deb` |
 | rpm | `rick-1.2.3-1.fedora-45.x86_64.rpm` |
 | tarball | `rick-1.2.3-linux-x64.tar.gz`, `rick-1.2.3-linux-arm64.tar.gz` |
+| a plugin's package | `rick-plugin-git_1.2.3_ubuntu-24.04_amd64.deb`, `rick-plugin-git-1.2.3-1.fedora-45.x86_64.rpm` |
+| the meta package | `rick-plugins_1.2.3_ubuntu-24.04_amd64.deb`, `rick-plugins-1.2.3-1.fedora-45.x86_64.rpm` |
 
 The package names carry the target, which is how the publisher finds the suite or repository a file belongs to ([`repositories.md`](repositories.md)).
 
@@ -351,10 +400,12 @@ An input wins over a variable, and a variable over the table. An input that is p
 
 ## Testing a change
 
-`.github/workflows/linux-packages-test.yml` calls the workflow with the app under `tests/fixture-app`, once as a cargo build with every input and once as a prebuilt folder with the fewest. The cargo build adds a file to the uploaded folder in the tarball's job, and its smoke command checks that the file is there and in no other job. Every build of it also puts a file aside for the smoke test: the smoke command checks that it arrived in the test's folder and not among the files for the release, and a last job gathers the artifacts as a release would and fails if anything but a package, a tarball or an added file is among them. It runs when the workflow, its scripts, `targets.json` or the fixture change, and by hand from the Actions tab. It needs no secret and attaches nothing.
+`.github/workflows/linux-packages-test.yml` calls the workflow with the app under `tests/fixture-app`, once as a cargo build with every input and once as a prebuilt folder with the fewest. The cargo build names two plugins: every smoke test installs their packages on top of the main one, and the smoke command finds each in its folder and none of them before. The cargo build adds a file to the uploaded folder in the tarball's job, and its smoke command checks that the file is there and in no other job. Every build of it also puts a file aside for the smoke test: the smoke command checks that it arrived in the test's folder and not among the files for the release, and a last job gathers the artifacts as a release would and fails if anything but a package, a tarball or an added file is among them. It runs when the workflow, its scripts, `targets.json` or the fixture change, and by hand from the Actions tab. It needs no secret and attaches nothing.
 
 The test names no runners, so in a fork it runs on GitHub's runners by the rule above, with nothing to set.
 
 The test names no release tag, so it attaches and attests nothing: the attest step first runs in an app's release. What decides between attesting and skipping, `attestable.sh`, has a test of its own under `tests/`.
 
-The scripts are in `.github/scripts/linux-packages/` and run in any container of a target's image; `prepare.sh` holds the pinned versions of cargo-deb, cargo-generate-rpm and nfpm.
+`tests/test-plugin-packages.sh` runs the script that makes the plugin packages, `plugins.sh`, for two plugins and four versions of a fixture, puts them into signed repositories beside the app's packages, and lets apt and dnf install a plugin by name in a clean container of every target: the plugin brings the app in its own version, a plugin of another version than the app is refused, an upgrade moves both, the meta package brings them all, and removing the app takes them along.
+
+The scripts are in `.github/scripts/linux-packages/` and run in any container of a target's image; `prepare.sh` holds the pinned versions of cargo-deb and cargo-generate-rpm, `nfpm.sh` that of nfpm.

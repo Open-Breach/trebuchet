@@ -2,18 +2,18 @@
 
 The one workflow that changes what `get.openbreach.dev` serves. It takes the packages of an app release from its GitHub Release and puts them into the apt and dnf repositories. What those repositories look like is in [`repositories.md`](repositories.md); the decisions are in [`spec.md`](spec.md), sections 3 and 4.4.
 
-In the same run it keeps the plugin registry: the signed list of the plugins the apps publish, with each app's latest version. What the list looks like and what an app attaches for it is in [`registry.md`](registry.md); the decisions are in the spec, section 7. This part is [switched off](#the-registrys-switch) until the repository says otherwise.
+In the same run it keeps the plugin registry: the signed list of the plugins the apps publish, with each app's latest version. What the list looks like and what an app attaches for it is in [`registry.md`](registry.md); the decisions are in the spec, section 7. This part is [switched off](#the-plugins-switch) until the repository says otherwise.
 
 ## What a run does
 
 1. **Checks the request**: the app name, the version and the release URL.
-2. **Fetches** the release's packages for that app and version, `<app>_<version>_*.deb` and `<app>-<version>-*.rpm`, and checks that each file holds the package its name says.
+2. **Fetches** the release's packages for that app and version, `<app>_<version>_*.deb` and `<app>-<version>-*.rpm`, and checks that each file holds the package its name says. With plugins [switched on](#the-plugins-switch), the app's plugin packages of the same version come along: `<app>-plugin-<id>` and the meta package `<app>-plugins` ([`linux-packages.md`](linux-packages.md), *Plugins as packages*). From there on they are packages like any other: the pool, the pruning and the indexes do not tell them apart.
 3. **Mirrors the pool** of every target from the bucket into an empty directory.
 4. **Adds** the new packages and **prunes** every package to its last three versions.
 5. **Rebuilds** every apt suite and dnf repository over the whole pool and **signs** them.
 6. **Syncs** to the bucket through its S3 API: the packages first, then the indexes with the signed entry points last, then the deletions.
 
-With the registry switched on, the same run also:
+With plugins switched on, the same run also:
 
 - **Fetches the release's plugins**: the manifests `plugins-<platform>.json` and the files they name. A release without a manifest has no plugins.
 - **Reads the registry's index** from the bucket and **verifies** it against `keys/registry.pub`. An index that does not verify stops the run: the publisher signs what it writes, so it only continues a list its key has signed.
@@ -70,7 +70,7 @@ A package for a target that [`targets.json`](../targets.json) does not list fail
 | `GPG_PASSPHRASE` | secret | Its passphrase. Not set when the key has none. |
 | `REGISTRY_SIGNING_KEY` | secret | The registry's minisign secret key: the whole contents of the file `minisign -G` wrote. |
 | `REGISTRY_SIGNING_PASSWORD` | secret | Its password. Not set when the key was made without one. |
-| `PUBLISH_PLUGINS` | variable | `true` switches the plugin registry on. Anything else, or nothing: off. |
+| `PUBLISH_PLUGINS` | variable | `true` switches plugins on: the plugin registry, and the plugin packages in the repositories. Anything else, or nothing: off. |
 | `RUNNER_LINUX_X64` | variable | Another runner label than the default. Not set here: the publisher runs on Depot's `depot-ubuntu-24.04-8`, the label Open-Breach's other repositories use. In a copy of this repository under another owner the default is GitHub's `ubuntu-24.04`. |
 
 Each secret is passed to the one step that needs it. The signing key is imported into a directory of the run, used, and deleted before anything is uploaded. No step prints a secret, and the scripts never put one on a command line.
@@ -79,11 +79,11 @@ The key in `GPG_PRIVATE_KEY` has to be the one whose public half is committed un
 
 The key in `REGISTRY_SIGNING_KEY` has to be the one whose public half is `keys/registry.pub`. `registry/sign.sh` checks every signature it makes against that file and stops when the secret is another key. It writes the secret to a file only inside its own run and deletes it when it ends. The workflow *registry key* asks the same question without publishing anything ([`keys/README.md`](../keys/README.md)).
 
-### The registry's switch
+### The plugins' switch
 
-The registry part of a run happens only where the repository variable `PUBLISH_PLUGINS` is `true`. Without it the run does everything else as before, says in a notice that the registry is switched off, and neither fetches a manifest, nor uses the registry's key, nor writes `registry/` or `plugins/` in the bucket. A run that asks to remove a release fails while the switch is off.
+Everything a run does for plugins happens only where the repository variable `PUBLISH_PLUGINS` is `true`. Without it the run publishes the app's own packages as before and says in a notice that plugins are switched off. It then neither fetches a manifest, nor uses the registry's key, nor writes `registry/` or `plugins/` in the bucket, and it leaves the app's plugin packages on the release: none goes into the apt and dnf repositories. A run that asks to remove a release fails while the switch is off.
 
-Switching it on is one setting: *Settings*, *Secrets and variables*, *Actions*, *Variables*, `PUBLISH_PLUGINS` = `true`. The next release then starts the index. A release that was published while the switch was off gets into the registry by running the publisher for it again, by hand.
+Switching it on is one setting: *Settings*, *Secrets and variables*, *Actions*, *Variables*, `PUBLISH_PLUGINS` = `true`. The next release then starts the index and brings its plugin packages. A release that was published while the switch was off gets its plugins published by running the publisher for it again, by hand.
 
 ## The bucket
 
@@ -137,6 +137,8 @@ Nothing a failed run leaves behind needs cleaning up before the next one: every 
 
 `tests/test-publish.sh` runs steps 3 to 6 against an S3 server on the same machine, with a throwaway key that takes the path of the real one (an armoured export in `GPG_PRIVATE_KEY`, imported into an empty gpg home). It publishes four releases of the fixture, checks the bucket, and lets the one-line installer install from what the bucket holds in a container of every target. It also covers the request check. See the top of the file for what it needs.
 
+It also runs `fetch.sh` and `fetch-plugins.sh` against a stand-in for `gh` that answers from a folder: the app's packages of the version and nothing else, and its plugin packages only where plugins are switched on.
+
 The same test runs the registry's steps with every one of those releases, with a throwaway minisign key that takes the path of the real one. It checks what the bucket holds and with which headers, repeats a release, and sees a run stop with the bucket untouched for a wrong plugin file, for secrets that are another key, for an index that does not verify and for a bucket that does not answer. It publishes an app without plugins, removes a release, and fetches a release's plugins through a stand-in for `gh`. Then it serves the bucket's content on the same machine and reads it with `registry/check.sh`, and sees a list with one byte changed, a list signed with another key and a changed plugin file refused.
 
-Not covered by any test, because they need the real thing: fetching from a GitHub Release (`fetch.sh`, and `fetch-plugins.sh` beyond the stand-in), R2 itself, and `get.openbreach.dev`.
+Not covered by any test, because they need the real thing: GitHub's own answers to `fetch.sh` and `fetch-plugins.sh`, R2 itself, and `get.openbreach.dev`.

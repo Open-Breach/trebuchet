@@ -4,8 +4,11 @@
 # exclude.
 #
 # Reads the inputs from the environment (TREBUCHET_*) and writes `matrix`,
-# `binary` and `package-version` to $GITHUB_OUTPUT, or to standard output
-# when that is not set.
+# `binary`, `package-version`, `plugins` and `plugin-ids` to $GITHUB_OUTPUT,
+# or to standard output when that is not set. `plugins` is the call's list
+# of plugin packages on one line, `[]` where the call names none, and
+# `plugin-ids` their ids with spaces between them, for the smoke test, which
+# has no jq.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -29,9 +32,12 @@ runtime_deps="${TREBUCHET_RUNTIME_DEPS:-}"
 build_deps="${TREBUCHET_BUILD_DEPS:-}"
 runner_x64="${TREBUCHET_RUNNER_X64:-}"
 runner_arm64="${TREBUCHET_RUNNER_ARM64:-}"
+plugins="${TREBUCHET_PLUGINS:-}"
+plugins_dir="${TREBUCHET_PLUGINS_DIR:-}"
 
 [ -n "$runtime_deps" ] || runtime_deps='{}'
 [ -n "$build_deps" ] || build_deps='{}'
+[ -n "${plugins//[[:space:]]/}" ] || plugins='[]'
 [ -n "$binary" ] || binary="$app"
 
 # The package name, by the rules of the stricter format (Debian policy 5.6.1).
@@ -75,8 +81,10 @@ esac
 tilde='~'
 package_version="${version/-/$tilde}"
 
-for name in runtime-deps build-deps; do
-  if [ "$name" = runtime-deps ]; then value="$runtime_deps"; else value="$build_deps"; fi
+# check_deps NAME JSON: a map of dependencies per distro or target, as
+# runtime-deps and build-deps are, and as a plugin's own runtime-deps.
+check_deps() {
+  local name="$1" value="$2" unknown bad
   jq -e 'type == "object" and all(.[]; type == "array" and all(.[]; type == "string"))' <<< "$value" > /dev/null 2>&1 \
     || die "$name is a JSON object of lists of strings, such as {\"debian\": [\"libfoo1\"], \"fedora\": [\"foo-libs\"]}"
   # A key is a distro (debian) or one target (debian-12).
@@ -86,7 +94,9 @@ for name in runtime-deps build-deps; do
   [ -z "$unknown" ] || die "$name: unknown key(s) $unknown; a key is a distro or a target id of targets.json"
   bad="$(jq -r '[.[][] | select(test("^[A-Za-z0-9/][A-Za-z0-9+._:()<>=|~/ -]*$") | not)] | join(", ")' <<< "$value")"
   [ -z "$bad" ] || die "$name: not a package name or dependency: $bad"
-done
+}
+check_deps runtime-deps "$runtime_deps"
+check_deps build-deps "$build_deps"
 jq -e 'all(.[][]; test("^[A-Za-z0-9][A-Za-z0-9+._-]*$"))' <<< "$build_deps" > /dev/null \
   || die "build-deps: package names only, without version constraints"
 
@@ -125,10 +135,46 @@ matrix="$(jq -c \
         } ]' "$targets")"
 [ "$matrix" != "[]" ] || die "exclude leaves no target to build"
 
+# The plugin packages: each a folder of the build that becomes a package of
+# its own, <app>-plugin-<id>, installed as <plugins-dir>/<id>/.
+jq -e 'type == "array" and all(.[]; type == "object")' <<< "$plugins" > /dev/null 2>&1 \
+  || die "plugins is a JSON list of objects, such as [{\"id\": \"git\", \"summary\": \"Git for the app\", \"files\": \"target/release/plugins/git\"}]"
+plugins="$(jq -c . <<< "$plugins")"
+if [ "$plugins" = "[]" ]; then
+  [ -z "$plugins_dir" ] || die "plugins-dir is for a call that names plugins"
+else
+  [ "$build" = cargo ] || die "plugins is for build: cargo; a prebuilt folder is one package"
+  # Where the app looks for its plugins once it is installed: an absolute
+  # path, without a way up and without a slash at its end.
+  if [[ ! "$plugins_dir" =~ ^(/[A-Za-z0-9._+-]+)+$ ]] || [[ "$plugins_dir/" =~ /\.\.?/ ]]; then
+    die "plugins-dir '$plugins_dir' is not the absolute path of a directory, such as /usr/lib/$app/plugins"
+  fi
+  problem="$(jq -r '[
+    to_entries[] | "plugin \(.key + 1)" as $where | .value
+    | if (.id | type) != "string" or (.id | test("^[a-z0-9][a-z0-9+.-]*$") | not)
+        then "\($where): id is lowercase letters, digits, \"+\", \"-\" and \".\", as in a package name"
+      elif (.summary | type) != "string" or (.summary | test("^[^\n]{1,120}$") | not) then "\(.id): summary is one line of text"
+      elif (.files | type) != "string" or (.files | test("^[A-Za-z0-9._][A-Za-z0-9._/+-]*$") | not) or ("/\(.files)/" | test("/\\.\\./"))
+        then "\(.id): files is the path of a folder inside working-directory"
+      elif (keys - ["id", "summary", "files", "runtime-deps"]) != [] then "\(.id): unknown key(s) \(keys - ["id", "summary", "files", "runtime-deps"] | join(", "))"
+      else empty end] | first // empty' <<< "$plugins")"
+  [ -z "$problem" ] || die "plugins: $problem"
+  twice="$(jq -r '[.[].id] | group_by(.) | map(select(length > 1) | .[0]) | join(", ")' <<< "$plugins")"
+  [ -z "$twice" ] || die "plugins: named more than once: $twice"
+  while IFS=$'\t' read -r id deps; do
+    check_deps "plugins: $id: runtime-deps" "$deps"
+  done < <(jq -r '.[] | [.id, (.["runtime-deps"] // {} | tojson)] | @tsv' <<< "$plugins")
+fi
+
 {
   echo "matrix=$matrix"
   echo "binary=$binary"
   echo "package-version=$package_version"
+  echo "plugins=$plugins"
+  echo "plugin-ids=$(jq -r 'map(.id) | join(" ")' <<< "$plugins")"
 } >> "${GITHUB_OUTPUT:-/dev/stdout}"
 
 echo "$app $version ($build): $(jq -r 'map("\(.target)/\(.arch)") | join(", ")' <<< "$matrix")"
+if [ "$plugins" != "[]" ]; then
+  echo "plugin packages, installed under $plugins_dir: $(jq -r --arg app "$app" 'map("\($app)-plugin-\(.id)") | join(", ")' <<< "$plugins"), and $app-plugins for all of them"
+fi

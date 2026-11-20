@@ -305,8 +305,11 @@ publish 5
 s3api s3 cp "$repo_root/targets.json" "s3://$R2_BUCKET/apt/pool/retired-1/keep.deb" > /dev/null
 s3api s3 cp "$repo_root/targets.json" "s3://$R2_BUCKET/rpm/retired-1/x86_64/repodata/repomd.xml" > /dev/null
 publish 6
-listing | grep -qx "apt/pool/retired-1/keep.deb" || fail "a publish deleted the pool of a retired target"
-listing | grep -qx "rpm/retired-1/x86_64/repodata/repomd.xml" || fail "a publish deleted the repository of a retired target"
+# The listing is taken whole before it is searched: a search that stops at
+# its first match would otherwise end the listing early, and fail it.
+now="$(listing)"
+grep -qx "apt/pool/retired-1/keep.deb" <<< "$now" || fail "a publish deleted the pool of a retired target"
+grep -qx "rpm/retired-1/x86_64/repodata/repomd.xml" <<< "$now" || fail "a publish deleted the repository of a retired target"
 echo "-- a republish changes nothing, a retired target is left alone"
 
 # --- the registry, run by run -------------------------------------------------
@@ -386,7 +389,8 @@ registry_ok plain release trebuchet-plain 0.3.1 https://github.com/Open-Breach/t
 registry_ok remove remove trebuchet-fixture 1.2.0
 [ "$(bucket_index | jq -r '[.apps["trebuchet-fixture"].plugins[].builds[].app_version] | unique | join(" ")')" = "1.1.0 1.3.0" ] \
   || fail "the removed release is still in the index"
-! listing | grep -q '^plugins/trebuchet-fixture/1\.2\.0/' || fail "the removed release's files are still in the bucket"
+now="$(listing)"
+! grep -q '^plugins/trebuchet-fixture/1\.2\.0/' <<< "$now" || fail "the removed release's files are still in the bucket"
 [ "$(listing | grep -c '^plugins/trebuchet-fixture/')" -eq 6 ] || fail "the removal took more than the release's files"
 [ "$(bucket_index | jq -r '.apps["trebuchet-fixture"].latest.version')" = "1.3.0" ] || fail "the removal changed latest"
 # What it would not delete: a path that is no plugin file of the registry.
@@ -394,7 +398,8 @@ for path in "apt/pool/debian-12/x.deb" "plugins/../install.sh" "plugins/a/b" "re
   echo "$path" > "$work/bad-removed"
   assert_fails "$scripts/bucket.sh" push-registry "$work/run-remove/site" "$work/bad-removed"
 done
-listing | grep -qx "install.sh" || fail "push-registry deleted outside the registry"
+now="$(listing)"
+grep -qx "install.sh" <<< "$now" || fail "push-registry deleted outside the registry"
 echo "-- the registry: repeated, refused, an app without plugins, a release removed"
 
 # --- fetching a release's plugins -----------------------------------------------------
@@ -462,6 +467,36 @@ jq '.plugins[0].file = "../../etc/passwd"' "$work/release/plugins-linux-x64.json
 mv "$work/manifest.new" "$work/release/plugins-linux-x64.json"
 assert_fails fetch_plugins "$work/fetched-path"
 echo "-- fetch-plugins.sh takes the manifests and the files they name"
+
+# fetch.sh, through the same stand-in: the app's packages of the version,
+# and with plugins switched on its plugin packages and the meta package
+# too. Never another app's package, and never another version.
+"$repo_root/tests/fixture/build.sh" "$work/release" 1.5.0 trebuchet-fixture-plugin-alpha > /dev/null
+"$repo_root/tests/fixture/build.sh" "$work/release" 1.5.0 trebuchet-fixture-plugins > /dev/null
+"$repo_root/tests/fixture/build.sh" "$work/release" 1.4.0 trebuchet-fixture-plugin-alpha > /dev/null
+"$repo_root/tests/fixture/build.sh" "$work/release" 1.5.0 another-fixture > /dev/null
+fetch_packages() {
+  PATH="$work/bin:$PATH" FAKE_RELEASE="$work/release" GH_TOKEN=none PUBLISH_REPOSITORY=Open-Breach/trebuchet-fixture \
+    PUBLISH_TAG=v1.5.0 PUBLISH_APP=trebuchet-fixture PUBLISH_PACKAGE_VERSION=1.5.0 PUBLISH_PLUGINS="$2" "$scripts/fetch.sh" "$1"
+}
+per_package="$(jq '(.targets | length) * (.arches | length)' "$targets")"
+fetch_packages "$work/fetched-packages" false > /dev/null
+[ "$(find "$work/fetched-packages" -type f | wc -l)" -eq "$per_package" ] || fail "fetch.sh without plugins fetched: $(ls "$work/fetched-packages")"
+[ -z "$(find "$work/fetched-packages" -name '*plugin*')" ] || fail "fetch.sh fetched plugin packages while plugins are switched off"
+out="$(fetch_packages "$work/fetched-all" true)"
+grep -qx "$per_package package(s) of trebuchet-fixture 1.5.0, $((per_package * 2)) plugin package(s)" <<< "$out" || fail "fetch.sh with plugins: $(tail -n 1 <<< "$out")"
+[ -z "$(find "$work/fetched-all" -name '*1.4.0*' -o -name 'another-*')" ] || fail "fetch.sh fetched another version or another app"
+# What it fetched goes into the pool like any package.
+"$repo_root/apt/add-packages.sh" "$work/fetched-pool/apt" "$work/fetched-all"/*.deb > /dev/null
+"$repo_root/rpm/add-packages.sh" "$work/fetched-pool/rpm" "$work/fetched-all"/*.rpm > /dev/null
+# A file that holds another package than its name says.
+suite="$(targets_of deb | head -n 1)"
+cp "$work/release/another-fixture_1.5.0_${suite}_amd64.deb" "$work/release/trebuchet-fixture-plugin-bad_1.5.0_${suite}_amd64.deb"
+assert_fails fetch_packages "$work/fetched-bad" true
+rm "$work/release/trebuchet-fixture-plugin-bad_1.5.0_${suite}_amd64.deb"
+cp "$work/release/trebuchet-fixture-plugin-alpha_1.4.0_${suite}_amd64.deb" "$work/release/trebuchet-fixture-plugin-old_1.5.0_${suite}_amd64.deb"
+assert_fails fetch_packages "$work/fetched-old" true
+echo "-- fetch.sh takes the app's packages, and its plugin packages where plugins are switched on"
 
 # What is in the bucket is a site the installer works against: downloaded
 # as it is and served over HTTP, as the bucket's domain serves it.

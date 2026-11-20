@@ -10,7 +10,9 @@ name: publish
 # release attached, keeps those of the last three releases, signs the index
 # and uploads the plugin files and then the index. This part runs only where
 # the repository variable PUBLISH_PLUGINS is `true`; without it nothing of
-# the registry is fetched, signed or uploaded.
+# the registry is fetched, signed or uploaded, and an app's plugin packages
+# (docs/spec.md 4.3) stay on its release: only the app's own packages go
+# into the repositories.
 #
 # Triggers:
 #   repository_dispatch, type `release`: sent by an app's release workflow,
@@ -72,12 +74,13 @@ jobs:
       REMOVED: ${{ github.workspace }}/.publish/removed
       GNUPGHOME: ${{ github.workspace }}/.publish/gnupg
       # The plugin registry: what the release attached for it, the files
-      # that left its index, the address it is served at, and whether this
-      # repository keeps one at all.
+      # that left its index, and the address it is served at.
       PLUGINS: ${{ github.workspace }}/.publish/plugins
       REGISTRY_REMOVED: ${{ github.workspace }}/.publish/registry-removed
       REGISTRY_BASE_URL: https://get.openbreach.dev
-      REGISTRY: ${{ vars.PUBLISH_PLUGINS == 'true' }}
+      # Whether this repository publishes plugins at all: the registry, and
+      # the plugin packages of the package repositories.
+      PUBLISH_PLUGINS: ${{ vars.PUBLISH_PLUGINS == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -97,16 +100,16 @@ jobs:
 
       # Said once, where the run starts, so that nobody reads a green run as
       # a published registry.
-      - name: the plugin registry is switched off
-        if: env.REGISTRY != 'true'
+      - name: plugins are switched off
+        if: env.PUBLISH_PLUGINS != 'true'
         env:
           MODE: ${{ steps.request.outputs.mode }}
         run: |
           if [ "$MODE" = remove ]; then
-            echo "::error::the plugin registry is switched off in this repository: there is nothing to remove a release from. The repository variable PUBLISH_PLUGINS turns it on (docs/publisher.md)."
+            echo "::error::plugins are switched off in this repository: there is no registry to remove a release from. The repository variable PUBLISH_PLUGINS turns them on (docs/publisher.md)."
             exit 1
           fi
-          echo "::notice::The plugin registry is switched off: nothing of it is fetched, signed or uploaded in this run. The repository variable PUBLISH_PLUGINS turns it on (docs/publisher.md)."
+          echo "::notice::Plugins are switched off: nothing of the plugin registry is fetched, signed or uploaded in this run, and no plugin package goes into the repositories. The repository variable PUBLISH_PLUGINS turns them on (docs/publisher.md)."
 
       - name: tools
         run: |
@@ -126,7 +129,7 @@ jobs:
         run: .github/scripts/publish/fetch.sh "$INCOMING"
 
       - name: fetch the release's plugins
-        if: steps.request.outputs.mode == 'release' && env.REGISTRY == 'true'
+        if: steps.request.outputs.mode == 'release' && env.PUBLISH_PLUGINS == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PUBLISH_REPOSITORY: ${{ steps.request.outputs.repository }}
@@ -143,7 +146,7 @@ jobs:
         run: .github/scripts/publish/bucket.sh pull "$SITE"
 
       - name: the registry's index from the bucket
-        if: steps.request.outputs.mode != 'republish' && env.REGISTRY == 'true'
+        if: steps.request.outputs.mode != 'republish' && env.PUBLISH_PLUGINS == 'true'
         env:
           R2_BUCKET: ${{ vars.R2_BUCKET }}
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
@@ -176,7 +179,7 @@ jobs:
       # bucket untouched. The registry's key exists as a file only inside
       # the script that signs.
       - name: "registry: merge, prune and sign"
-        if: steps.request.outputs.mode != 'republish' && env.REGISTRY == 'true'
+        if: steps.request.outputs.mode != 'republish' && env.PUBLISH_PLUGINS == 'true'
         env:
           REGISTRY_SIGNING_KEY: ${{ secrets.REGISTRY_SIGNING_KEY }}
           REGISTRY_SIGNING_PASSWORD: ${{ secrets.REGISTRY_SIGNING_PASSWORD }}
@@ -212,7 +215,7 @@ jobs:
       # After the packages: a deb or an rpm of a plugin is in its repository
       # before the registry's index changes.
       - name: sync the registry to the bucket
-        if: steps.request.outputs.mode != 'republish' && env.REGISTRY == 'true'
+        if: steps.request.outputs.mode != 'republish' && env.PUBLISH_PLUGINS == 'true'
         env:
           R2_BUCKET: ${{ vars.R2_BUCKET }}
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
@@ -224,7 +227,7 @@ jobs:
       # against keys/registry.pub, and every plugin file of this release
       # downloads with the size and the SHA-256 the index names.
       - name: read the registry as an app does
-        if: steps.request.outputs.mode != 'republish' && env.REGISTRY == 'true'
+        if: steps.request.outputs.mode != 'republish' && env.PUBLISH_PLUGINS == 'true'
         env:
           MODE: ${{ steps.request.outputs.mode }}
           PUBLISH_APP: ${{ steps.request.outputs.app }}
