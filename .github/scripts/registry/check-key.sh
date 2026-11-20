@@ -34,7 +34,8 @@ signed="$("$root/registry/sign.sh" "$file" "key check, not an index")" || {
   exit 1
 }
 printf '%s\n' "$signed"
-key="$(sed -n 's/.* with the key \([0-9A-F]\{16\}\)$/\1/p' <<< "$signed")"
+key="$(sed -n 's/.* with the key \([0-9A-F]\{1,16\}\)$/\1/p' <<< "$signed")"
+[ -n "$key" ] || die "sign.sh did not say which key it signed with"
 
 # As a reader does it, and as docs/registry.md tells a person to.
 minisign -V -H -p "$public" -m "$file" > /dev/null 2>&1 \
