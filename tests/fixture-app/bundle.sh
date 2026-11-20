@@ -24,6 +24,18 @@ cp target/release/trebuchet-fixture target/release/bundle/
 echo "bundled for ${TREBUCHET_TARGET:-no target} ${TREBUCHET_ARCH:-}" > target/release/bundle/data/greeting.txt
 if [ -n "$extra" ]; then cp "$extra" target/release/bundle/data/; fi
 
+# Two plugins that are packages of their own (the call's `plugins`): each a
+# folder of this build, outside the bundle, so that neither the main package
+# nor the tarball holds them. The first has a folder inside it and a file
+# that can be run; the second is one file.
+rm -rf target/release/plugins
+mkdir -p target/release/plugins/hello/data target/release/plugins/extra
+echo "hello for ${TREBUCHET_TARGET:-no target} ${TREBUCHET_ARCH:-}" > target/release/plugins/hello/plugin.txt
+echo "more of hello" > target/release/plugins/hello/data/more.txt
+printf '#!/bin/sh\necho "hello from the plugin"\n' > target/release/plugins/hello/run.sh
+chmod 755 target/release/plugins/hello/run.sh
+echo "extra for ${TREBUCHET_TARGET:-no target} ${TREBUCHET_ARCH:-}" > target/release/plugins/extra/plugin.txt
+
 # The two folders the workflow hands a build's files on through. Both are
 # there when the build command starts: nothing here makes them.
 #

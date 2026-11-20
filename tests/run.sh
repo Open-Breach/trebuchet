@@ -11,6 +11,8 @@
 # The tests that install from a repository run apt and dnf in the targets'
 # containers and need docker. tests/test-publish.sh also needs the AWS CLI
 # and moto's S3 server; its first lines say how to get it.
+# tests/test-plugin-packages.sh uses the nfpm on the PATH, or downloads the
+# pinned release.
 set -uo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1

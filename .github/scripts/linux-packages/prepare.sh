@@ -7,19 +7,19 @@
 #   TREBUCHET_FORMAT      deb or rpm
 #   TREBUCHET_BUILD       cargo or prebuilt
 #   TREBUCHET_BUILD_DEPS  space-separated distro packages (cargo only)
+#   TREBUCHET_PLUGINS     the call's list of plugin packages, [] for none
 set -euo pipefail
 
-# The tool versions, pinned here and nowhere else. The cargo tools are built
-# from their crates.io sources; nfpm is its release binary, checked against
-# the checksums.txt of the release.
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# The versions of the cargo tools, pinned here and nowhere else; they are
+# built from their crates.io sources. nfpm's is pinned in nfpm.sh.
 cargo_deb_version="3.8.0"
 cargo_generate_rpm_version="0.21.1"
-nfpm_version="2.49.0"
-nfpm_sha256_x86_64="2afaa5ffb5e3493402e31e7c67a5a1fb42133e3f66fc315ca0051934125561c7"
-nfpm_sha256_aarch64="d4eee71839e92c68cbd3b101640bad32d2856fc551acae0635be9118e48c9d9c"
 
 format="${TREBUCHET_FORMAT:?}"
 build="${TREBUCHET_BUILD:?}"
+plugins="${TREBUCHET_PLUGINS:-[]}"
 read -r -a build_deps <<< "${TREBUCHET_BUILD_DEPS:-}"
 
 tools="/opt/trebuchet"
@@ -27,22 +27,12 @@ mkdir -p "$tools/bin"
 echo "$tools/bin" >> "${GITHUB_PATH:-/dev/null}"
 
 if [ "$build" = prebuilt ]; then
-  case "$(uname -m)" in
-    x86_64) asset="nfpm_${nfpm_version}_Linux_x86_64.tar.gz" sha256="$nfpm_sha256_x86_64" ;;
-    aarch64) asset="nfpm_${nfpm_version}_Linux_arm64.tar.gz" sha256="$nfpm_sha256_aarch64" ;;
-    *)
-      echo "::error::no nfpm for $(uname -m)"
-      exit 1
-      ;;
-  esac
-  download="$(mktemp -d)"
-  curl -fsSL --retry 3 -o "$download/$asset" \
-    "https://github.com/goreleaser/nfpm/releases/download/v$nfpm_version/$asset"
-  echo "$sha256  $download/$asset" | sha256sum --check --quiet
-  tar -xzf "$download/$asset" -C "$tools/bin" nfpm
-  rm -rf "$download"
-  "$tools/bin/nfpm" --version | grep -i -m 1 version || true
+  "$here/nfpm.sh" "$tools/bin"
   exit 0
+fi
+# A cargo build makes its plugin packages with nfpm as well.
+if [ "$(jq 'length' <<< "$plugins")" -gt 0 ]; then
+  "$here/nfpm.sh" "$tools/bin"
 fi
 
 case "$format" in
