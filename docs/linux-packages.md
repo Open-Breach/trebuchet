@@ -291,7 +291,7 @@ Before the files are attached, the same job attests them (spec, decision 10 and 
 
 - **What is attested**: every file that is attached. The debs, the rpms, the tarballs, and [what the builds added](#files-the-build-adds).
 - **When**: with `release-tag` only. A run without it, such as this repository's own test, attests nothing.
-- **Permissions**: the job needs `id-token: write` and `attestations: write`. A called workflow cannot give itself more than its caller has, so the calling job grants both, beside `contents: write`, as in the [call above](#calling-it). For a public repository a call with `release-tag` and without them stops in the release job and names the two permissions; nothing is attached.
+- **Permissions**: the job needs `id-token: write` and `attestations: write`. A called workflow cannot give itself more than its caller has, so the calling job grants both, beside `contents: write`, as in the [call above](#calling-it). For a public repository a call with `release-tag` and without them fails in the attest step, before anything is attached.
 - **A private repository is skipped.** GitHub offers attestations to private repositories on its Enterprise Cloud plan only. The job asks GitHub's API for the calling repository's own record, with the job's token, and attests where its `visibility` is `public`. Where it is `private` or `internal`, the step is skipped with a line in the job summary, and the files are attached without an attestation. No input says which, and no app is named.
 - **The step** is [`actions/attest`](https://github.com/actions/attest) with the files as its `subject-path`.
 

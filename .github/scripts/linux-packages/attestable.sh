@@ -15,11 +15,10 @@
 #   GH_TOKEN             the job's token
 #   TREBUCHET_VISIBILITY for the tests: the visibility, and GitHub is not
 #                        asked
-#   ACTIONS_ID_TOKEN_REQUEST_URL
-#                        set by the runner where the job was granted
-#                        id-token: write, without which nothing is signed
 #
-# Writes attest=true or attest=false to $GITHUB_OUTPUT.
+# Writes attest=true or attest=false to $GITHUB_OUTPUT. Whether the calling
+# job granted the permissions an attestation needs is not looked at here:
+# the attest step that follows fails without them, and says so.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -37,9 +36,6 @@ fi
 
 case "$visibility" in
   public)
-    if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
-      die "$repo is public, so its release is attested, and the job that calls linux-packages.yml did not grant id-token: write. It grants id-token: write and attestations: write beside contents: write (docs/linux-packages.md, Build attestations)"
-    fi
     attest=true
     echo "$repo is public: its release files are attested"
     ;;
