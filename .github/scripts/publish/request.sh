@@ -6,14 +6,18 @@
 # carries the packages. It comes from an app's release workflow
 # (repository_dispatch) or from a manual run (workflow_dispatch). A manual
 # run without any of the three is a republish: nothing new is fetched, the
-# repositories are rebuilt and signed as they are.
+# repositories are rebuilt and signed as they are. A manual run may instead
+# name a release to take out of the plugin registry: an app and a version,
+# with PUBLISH_REMOVE set.
 #
 #   PUBLISH_APP, PUBLISH_VERSION, PUBLISH_RELEASE_URL    the request
+#   PUBLISH_REMOVE             true: remove the release from the registry
 #   PUBLISH_EVENT              repository_dispatch or workflow_dispatch
 #   GITHUB_REPOSITORY_OWNER    releases of this owner only
 #
-# Writes mode (release or republish), app, package-version, repository and
-# tag to $GITHUB_OUTPUT, or to standard output when that is not set.
+# Writes mode (release, republish or remove), app, package-version,
+# repository, tag and release-url to $GITHUB_OUTPUT, or to standard output
+# when that is not set.
 set -euo pipefail
 
 die() {
@@ -25,8 +29,26 @@ app="${PUBLISH_APP:-}"
 version="${PUBLISH_VERSION:-}"
 url="${PUBLISH_RELEASE_URL:-}"
 event="${PUBLISH_EVENT:-}"
+remove="${PUBLISH_REMOVE:-}"
 owner="${GITHUB_REPOSITORY_OWNER:?}"
 out="${GITHUB_OUTPUT:-/dev/stdout}"
+
+# A removal is a person's decision: no release workflow sends one.
+if [ "$remove" = true ]; then
+  [ "$event" = workflow_dispatch ] || die "a release is removed from the registry by a manual run only"
+  if [ -z "$app" ] || [ -z "$version" ]; then
+    die "to remove a release from the registry, name its app and its version"
+  fi
+  [[ "$app" =~ ^[a-z0-9][a-z0-9+.-]+$ ]] || die "app is not a package name"
+  [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "version is not X.Y.Z"
+  {
+    echo "mode=remove"
+    echo "app=$app"
+    echo "package-version=$version"
+  } >> "$out"
+  echo "remove: $app $version leaves the plugin registry"
+  exit 0
+fi
 
 if [ -z "$app$version$url" ]; then
   [ "$event" = workflow_dispatch ] || die "the request names no app, version and release URL"
@@ -58,5 +80,6 @@ tag="${BASH_REMATCH[3]}"
   echo "package-version=$version"
   echo "repository=$url_owner/$repository"
   echo "tag=$tag"
+  echo "release-url=$url"
 } >> "$out"
 echo "release: $app $version from $url_owner/$repository, tag $tag"

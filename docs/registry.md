@@ -115,6 +115,18 @@ jq -r '.apps.rick.plugins[].builds[] | "\(.sha256)  \(.url)"' index.json
 
 An app that reads the registry compiles the public key in and refuses a list whose signature does not verify. The signature is the kind minisign makes today, over the file's hash. The legacy kind is never made: Rick's client refuses it.
 
+`registry/check.sh` does all of the above in one go, from a checkout of this repository:
+
+```sh
+registry/check.sh https://get.openbreach.dev              # the list, and every file it names
+registry/check.sh https://get.openbreach.dev rick 0.6.0   # the list, and the files of one release
+registry/check.sh --index https://get.openbreach.dev      # the list alone
+```
+
+## How it is published
+
+The publisher, `publish.yml`, runs the scripts below in the same run in which it publishes the release's packages: [`publisher.md`](publisher.md) has the steps, the switch that turns the registry on, and what to do when a run fails.
+
 ## Scripts
 
 All in `registry/`. They need `jq`; `sign.sh` needs `minisign` 0.10 or newer. `SITE` is a local copy of what is served: the list is `SITE/registry/index.json`, and the plugin files are under `SITE/plugins/`.
@@ -125,6 +137,7 @@ All in `registry/`. They need `jq`; `sign.sh` needs `minisign` 0.10 or newer. `S
 | `prune.sh SITE REMOVED_LIST [KEEP]` | Keeps the builds of every app's `KEEP` newest releases, default 3. Appends the paths of the files that left to `REMOVED_LIST`. |
 | `remove.sh SITE REMOVED_LIST APP VERSION` | Takes one release out of the list. Appends the paths of its files to `REMOVED_LIST`. A release the list has nothing of is an error. |
 | `sign.sh FILE` | Signs with the key of the secrets `REGISTRY_SIGNING_KEY` and `REGISTRY_SIGNING_PASSWORD`, writes `FILE.minisig`, and checks the signature against `keys/registry.pub`. |
+| `check.sh [--index] BASE_URL [APP [VERSION]]` | Reads a registry as an app does: fetches the list and its signature, verifies them against `keys/registry.pub`, downloads the files the list names and compares each with its size and SHA-256. Changes nothing. |
 
 `merge.sh` reads two settings from the environment: `REGISTRY_BASE_URL`, the address `SITE` is served at, by default `https://get.openbreach.dev`; and `REGISTRY_PUBLISHER`, by default the owner of the repository the workflow runs in.
 
@@ -132,4 +145,4 @@ A script that fails leaves the list as it was. A path in `REMOVED_LIST` is alway
 
 ## Testing a change
 
-`tests/test-registry.sh` runs the scripts on releases of a made-up app, which `tests/fixture/plugins.sh` writes: a first release, the same release again, a fourth release that prunes the first, files and manifests that are wrong, an app without plugins, and a release that is removed. It signs with a throwaway key made in the test and verifies with `minisign`. `tests/test-registry-key.sh` covers `sign.sh`. Neither uses the real key.
+`tests/test-registry.sh` runs the scripts on releases of a made-up app, which `tests/fixture/plugins.sh` writes: a first release, the same release again, a fourth release that prunes the first, files and manifests that are wrong, an app without plugins, and a release that is removed. It signs with a throwaway key made in the test and verifies with `minisign`. `tests/test-registry-key.sh` covers `sign.sh`. `tests/test-publish.sh` runs the publisher's steps against a bucket on the same machine and reads the result with `check.sh`. None of them uses the real key.
