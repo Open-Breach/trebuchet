@@ -57,7 +57,7 @@ jobs:
       - name: tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends apt-utils createrepo-c rpm jq gnupg
+          sudo apt-get install -y --no-install-recommends apt-utils createrepo-c rpm jq gnupg minisign
           docker --version
           aws --version
       # A local S3 server for the publisher's test, in a virtual environment
