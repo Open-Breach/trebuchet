@@ -10,6 +10,12 @@ The examples install Rick, the file manager. Any other package name works the sa
 curl -fsSL https://get.openbreach.dev/install.sh | sh -s rick
 ```
 
+On a system without curl, wget does the same:
+
+```sh
+wget -qO- https://get.openbreach.dev/install.sh | sh -s rick
+```
+
 The script reads `/etc/os-release`, adds the Open-Breach repository for your distro together with its signing key, and installs the package with `apt` or `dnf`. It asks for `sudo` when it is not run as root. It does nothing else, and it is short enough to read first: [`install.sh`](../install.sh).
 
 To see what it would do without changing anything:

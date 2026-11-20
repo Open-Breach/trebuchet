@@ -1,6 +1,6 @@
 # Trebuchet
 
-**Status: bootstrapping. Nothing is published yet.**
+**Status: live.** `get.openbreach.dev` serves the apt and dnf repositories and the plugin registry, with Rick 0.6.0.
 
 Trebuchet is the distribution repository of [Open-Breach](https://github.com/Open-Breach). Like the siege engine, it hurls packages a long way.
 
@@ -11,9 +11,12 @@ It does two jobs:
 
 Apps build, Trebuchet publishes.
 
-## What it will serve
+## What it serves
 
-- [Rick](https://github.com/Open-Breach/rick), the file manager
+- [Rick](https://github.com/Open-Breach/rick), the file manager: its packages for apt and dnf, and its plugins in the registry.
+
+Coming, once they publish through it:
+
 - [Meeseeks](https://github.com/Open-Breach/meeseeks), the virtual second monitor for Linux
 - Gossip, the Kubernetes log tail
 
