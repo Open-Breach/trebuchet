@@ -11,7 +11,7 @@ For every target in [`targets.json`](../targets.json) and for x86-64 and arm64:
 3. **Tarball**: one target per architecture also makes `<app>-<version>-linux-<arch>.tar.gz` in the established layout.
 4. **Smoke test**, in a fresh container of the same image: install the package with `apt` or `dnf`, run `<binary> --version`, validate the desktop entry with `desktop-file-validate`. The tarball is unpacked and tested the same way. An app can add [checks of its own](#a-smoke-test-of-the-apps-own).
 5. **Upload** everything as artifacts of the run, with [what the build added](#files-the-build-adds).
-6. **Attach** everything to a GitHub Release of the calling repository, if the call names one and every smoke test passed.
+6. **Attest and attach**, if the call names a release and every smoke test passed: every file gets a [build attestation](#build-attestations) and is attached to that GitHub Release of the calling repository.
 
 arm64 packages are built and smoke-tested on arm64 runners, and are otherwise untested until someone with hardware reports back (spec, decision 4).
 
@@ -24,6 +24,8 @@ jobs:
   linux:
     permissions:
       contents: write        # to attach to the release; read is enough without release-tag
+      id-token: write        # these two to attest the release's files;
+      attestations: write    # neither is needed without release-tag
     uses: Open-Breach/trebuchet/.github/workflows/linux-packages.yml@main
     with:
       app: rick
@@ -55,7 +57,7 @@ jobs:
 | `build` | | `cargo` | `cargo` or `prebuilt`. |
 | `artifact` | prebuilt | required there | Name of the artifact of the same run that holds the prebuilt folder. |
 | `exclude` | both | none | Target ids to leave out, separated by spaces or commas: `debian-12`. |
-| `release-tag` | both | none | Tag of the GitHub Release to attach the files to. Empty: artifacts only. |
+| `release-tag` | both | none | Tag of the GitHub Release to attach the files to, [attested](#build-attestations) first. Empty: artifacts only, and nothing is attested. |
 | `build-deps` | cargo | `{}` | Distro packages the build needs, per distro, in the shape of `runtime-deps`. Names only. |
 | `build-command` | cargo | `cargo build --release --locked` | The command that builds the app, run with bash in `working-directory`. |
 | `build-artifact` | cargo | none | Name of an artifact of the same run that the build needs, downloaded before `build-command`. See [Files from an earlier job](#files-from-an-earlier-job). |
@@ -140,7 +142,7 @@ If the build lays out a folder, name it in `bundle-dir`: the tarball is made fro
 
 ### Files the build adds
 
-The package and the tarball are written to the folder `TREBUCHET_DIST` names, and the job uploads that folder whole. A build command may put files of its own there. They travel with the package: into the job's artifact, to the smoke test, and with `release-tag` onto the release. Trebuchet passes them along and does not look at them.
+The package and the tarball are written to the folder `TREBUCHET_DIST` names, and the job uploads that folder whole. A build command may put files of its own there. They travel with the package: into the job's artifact, to the smoke test, and with `release-tag` onto the release, attested like the package. Trebuchet passes them along and does not look at them.
 
 - **Files that belong to one build.** Some files fit the build they were made with and no other, such as add-ons compiled against it. The tarball is such a build's output too, so they are added where `TREBUCHET_TARBALL` is `true`: once per architecture, from the same build as the tarball.
 - **Names.** The files of every job end up side by side, in the release or wherever the caller gathers the artifacts. A name therefore says what the tarball's name says, the version and the architecture, or it is overwritten by its namesake from another job.
@@ -210,7 +212,7 @@ Three limits to know:
 - **The tarball is tested with the package installed.** The tarball declares no dependencies; the package brought the libraries.
 - **What the command installs, it installs for itself.** A tool the command needs, it installs after the checks that should notice a missing library.
 
-A file the command needs from the build, such as a test program compiled with it, reaches it through `TREBUCHET_DIST`, and so is uploaded with the package; with `release-tag` it would be attached to the release as well.
+A file the command needs from the build, such as a test program compiled with it, reaches it through `TREBUCHET_DIST`, and so is uploaded with the package; with `release-tag` it is attested and attached to the release as well.
 
 `tests/fixture-app/smoke.sh` is such a command.
 
@@ -283,6 +285,24 @@ The calling job needs `permissions: contents: write` for this. Nothing is attach
 
 After the release is published, the app's workflow tells Trebuchet to publish the packages (spec, section 3, release flow).
 
+### Build attestations
+
+Before the files are attached, the same job attests them (spec, decision 10 and section 3, *Build attestations*). A build attestation is a record, signed by GitHub and kept with the calling repository, that says which workflow built a file, in which repository and from which commit. Nobody holds a key for it.
+
+- **What is attested**: every file that is attached. The debs, the rpms, the tarballs, and [what the builds added](#files-the-build-adds).
+- **When**: with `release-tag` only. A run without it, such as this repository's own test, attests nothing.
+- **Permissions**: the job needs `id-token: write` and `attestations: write`. A called workflow cannot give itself more than its caller has, so the calling job grants both, beside `contents: write`, as in the [call above](#calling-it). For a public repository a call with `release-tag` and without them stops in the release job and names the two permissions; nothing is attached.
+- **A private repository is skipped.** GitHub offers attestations to private repositories on its Enterprise Cloud plan only. The job asks GitHub's API for the calling repository's own record, with the job's token, and attests where its `visibility` is `public`. Where it is `private` or `internal`, the step is skipped with a line in the job summary, and the files are attached without an attestation. No input says which, and no app is named.
+- **The step** is [`actions/attest`](https://github.com/actions/attest) with the files as its `subject-path`.
+
+To verify a file, with the [GitHub CLI](https://cli.github.com):
+
+```sh
+gh attestation verify rick_1.2.3_ubuntu-24.04_amd64.deb --owner Open-Breach --signer-repo Open-Breach/trebuchet
+```
+
+The attestation is kept with the app's repository, which `--owner` covers. Its signer is this repository's workflow, whichever app called it, so `--signer-repo` names this repository.
+
 ## Runners
 
 The jobs of a reusable workflow run in the repository that calls it, and that repository's owner decides where:
@@ -312,5 +332,7 @@ An input wins over a variable, and a variable over the table. An input that is p
 `.github/workflows/linux-packages-test.yml` calls the workflow with the app under `tests/fixture-app`, once as a cargo build with every input and once as a prebuilt folder with the fewest. The cargo build adds a file to the uploaded folder in the tarball's job, and its smoke command checks that the file is there and in no other job. It runs when the workflow, its scripts, `targets.json` or the fixture change, and by hand from the Actions tab. It needs no secret and attaches nothing.
 
 The test names no runners, so in a fork it runs on GitHub's runners by the rule above, with nothing to set.
+
+The test names no release tag, so it attaches and attests nothing: the attest step first runs in an app's release. What decides between attesting and skipping, `attestable.sh`, has a test of its own under `tests/`.
 
 The scripts are in `.github/scripts/linux-packages/` and run in any container of a target's image; `prepare.sh` holds the pinned versions of cargo-deb, cargo-generate-rpm and nfpm.

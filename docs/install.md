@@ -135,6 +135,18 @@ The first is for apt, after the key is in place; the second works anywhere, and 
 
 The public key is in this repository under [`keys/`](../keys/), and is served as `https://get.openbreach.dev/keys/openbreach.gpg` for apt and, in text form, as `https://get.openbreach.dev/keys/openbreach.asc` for dnf. How the packages are built, signed and published is all in this repository: [`linux-packages.md`](linux-packages.md) and [`repositories.md`](repositories.md).
 
+## Where a package was built
+
+The key above signs the repositories. A second record, separate from it, says where a single file was built: every package and tarball of an app in a public repository carries a GitHub build attestation. It is signed by GitHub and names the workflow, the repository and the commit the file was built from. Nobody holds a key for it.
+
+To check a package or a tarball you downloaded from an app's release, with the [GitHub CLI](https://cli.github.com):
+
+```sh
+gh attestation verify rick_1.2.3_ubuntu-24.04_amd64.deb --owner Open-Breach --signer-repo Open-Breach/trebuchet
+```
+
+`--signer-repo` names this repository because its workflow builds the packages, for whichever app. The command fails for a file that was changed after it was built, and for one that was built anywhere else. An attestation says where a file comes from, not that it is safe.
+
 ## Updating, going back, removing
 
 Updates arrive with the rest of your system: `sudo apt upgrade`, `sudo dnf upgrade`, or your desktop's software updater.
