@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # The registry scripts, on releases of a made-up app with plugins
-# (tests/fixture/plugins.sh): a first release, the same release again, a
-# fourth release that prunes the first, a file whose hash is wrong, an app
-# without plugins that only gets `latest`, and a release that is removed.
+# (tests/fixture/plugins.sh): a first release, the same release again, more
+# releases beside which the first one stays, a file whose hash is wrong, an
+# app without plugins that only gets `latest`, and a release that is removed.
 # The index is signed with a throwaway minisign key made here and verified
 # the way a reader does it. The real key is never used.
 #
@@ -223,61 +223,71 @@ echo 'not json' > "$work/newer/registry/index.json"
 assert_fails "$registry/merge.sh" "$work/newer" demo 2.0.0 "$(release_url 2.0.0)" "$work/good"
 [ "$(cat "$work/newer/registry/index.json")" = "not json" ] || fail "a file that is no index was replaced"
 
-# --- three more releases: the fourth prunes the first ---------------------------------
+# --- more releases: every one of them stays --------------------------------------------
 
-: > "$removed"
+# The registry keeps every build of every release (docs/spec.md 7.4): an app
+# of any released version still finds its plugins. Nothing here prunes, and
+# no script of the registry does.
 for version in 1.1.0 1.2.0; do
   merge "$version" > /dev/null
-  "$registry/prune.sh" "$site" "$removed" > /dev/null
 done
-[ ! -s "$removed" ] || fail "three releases, and something was pruned: $(cat "$removed")"
 [ "$(builds | wc -l)" -eq 9 ] || fail "expected nine builds of three releases"
 # Name, description and meta follow the newest build.
 [ "$(query '.apps.demo.plugins[0].description')" = "What alpha does, as of 1.2.0." ] || fail "the description is not the newest build's"
 [ "$(query '.apps.demo.plugins[0].meta.since')" = "1.2.0" ] || fail "meta is not the newest build's"
 
-# 1.10.0 is newer than 1.2.0: versions are compared as versions.
-merge 1.10.0 > /dev/null
-out="$("$registry/prune.sh" "$site" "$removed")"
-grep -qF "registry: pruned demo 1.0.0: 3 build(s)" <<< "$out" || fail "unexpected summary of the pruning: $out"
+# A fourth release, where the package repositories let the first one go:
+# here it stays. 1.10.0 is newer than 1.2.0: versions are compared as
+# versions.
+out="$(merge 1.10.0)"
+grep -qF "3 build(s) added, 0 already there; latest is 1.10.0" <<< "$out" || fail "unexpected summary of the fourth release: $out"
 [ "$(query '.apps.demo.latest.version')" = "1.10.0" ] || fail "latest is not 1.10.0"
-[ "$(query '[.apps.demo.plugins[].builds[].app_version] | unique | join(" ")')" = "1.1.0 1.10.0 1.2.0" ] \
-  || fail "the builds of 1.0.0 are still in the index"
-[ "$(sort "$removed")" = "plugins/demo/1.0.0/alpha-1.0.0-linux-x64.plugin
-plugins/demo/1.0.0/alpha-1.0.0-macos-arm64.plugin
-plugins/demo/1.0.0/beta-1.0.0-linux-x64.plugin" ] || fail "unexpected files to delete: $(cat "$removed")"
-# The builds of a release stand in the order of the versions, oldest first.
-[ "$(query '[.apps.demo.plugins[0].builds[].app_version] | unique_by(.) | length')" -eq 3 ] || fail "alpha has builds of more than three releases"
-[ "$(query '.apps.demo.plugins[0].builds | first.app_version + " " + last.app_version')" = "1.1.0 1.10.0" ] \
+[ "$(builds | wc -l)" -eq 12 ] || fail "expected twelve builds of four releases: $(builds)"
+[ "$(builds | grep -c ' 1\.0\.0 ')" -eq 3 ] || fail "the builds of the first release left the index: $(builds)"
+[ "$(query '.apps.demo.plugins[0].builds[0] | "\(.app_version) \(.url)"')" = "1.0.0 $base/plugins/demo/1.0.0/alpha-1.0.0-linux-x64.plugin" ] \
+  || fail "the first release's first build is not what it was"
+# The builds of a plugin stand in the order of the versions, oldest first.
+[ "$(query '[.apps.demo.plugins[0].builds[].app_version] | join(" ")')" = "1.0.0 1.0.0 1.1.0 1.1.0 1.2.0 1.2.0 1.10.0 1.10.0" ] \
   || fail "the builds are not in the order of the versions"
-# Pruning again finds nothing.
-cp "$index" "$work/pruned.json"
-: > "$removed"
-"$registry/prune.sh" "$site" "$removed" > /dev/null
-[ ! -s "$removed" ] || fail "pruning twice removed something"
-cmp -s "$work/pruned.json" "$index" || fail "pruning twice changed the index"
+# What was staged is the new releases' files, and nothing was taken away:
+# the first release's files are the bucket's, which this run never held.
+[ "$(staged | wc -l)" -eq 9 ] || fail "expected the nine files of three new releases: $(staged)"
 
-# An older release, published again after a newer one: its builds come back
-# until they are pruned, and neither latest nor the description follow it.
+# The oldest release, published again after newer ones: it is there, so
+# nothing is added, and neither latest nor the description follow it.
+cp "$index" "$work/four.json"
 out="$(merge 1.0.0)"
-grep -qF "3 build(s) added" <<< "$out" || fail "the older release was not added again: $out"
+grep -qF "0 build(s) added, 3 already there; latest is 1.10.0" <<< "$out" || fail "unexpected summary of the oldest release again: $out"
+cmp -s "$work/four.json" "$index" || fail "the oldest release again changed the index"
+
+# A release that comes late, after a newer one is out: its builds are added
+# where they belong and stay, and neither latest nor the description follow.
+release 1.3.0 linux-x64 alpha beta
+release 1.3.0 macos-arm64 alpha
+out="$(merge 1.3.0)"
+grep -qF "3 build(s) added, 0 already there; latest is 1.10.0" <<< "$out" || fail "the late release was not added: $out"
 [ "$(query '.apps.demo.latest.version')" = "1.10.0" ] || fail "an older release became latest"
 [ "$(query '.apps.demo.plugins[0].description')" = "What alpha does, as of 1.10.0." ] || fail "an older release gave the description"
-"$registry/prune.sh" "$site" "$removed" > /dev/null
-[ "$(wc -l < "$removed")" -eq 3 ] || fail "the older release was not pruned again"
+[ "$(query '[.apps.demo.plugins[0].builds[].app_version] | unique_by(.) | join(" ")')" = "1.0.0 1.1.0 1.10.0 1.2.0 1.3.0" ] \
+  || fail "unexpected releases of alpha"
+[ "$(query '.apps.demo.plugins[0].builds | map(.app_version) | .[4:] | join(" ")')" = "1.2.0 1.2.0 1.3.0 1.3.0 1.10.0 1.10.0" ] \
+  || fail "the late release's builds are not in the order of the versions"
 rm -rf "$site/plugins"
 
-# A plugin that later releases no longer carry leaves with its last build.
+# A plugin that later releases no longer carry stays, with the builds of the
+# releases that carried it and the name and description of its newest one.
 for version in 2.0.0 2.1.0 2.2.0; do
   "$repo_root/tests/fixture/plugins.sh" "$work/demo-$version" demo "$version" linux-x64 alpha
   merge "$version" > /dev/null
-  "$registry/prune.sh" "$site" "$removed" > /dev/null
 done
-[ "$(query '[.apps.demo.plugins[].id] | join(" ")')" = "alpha" ] || fail "beta is still in the index: $(builds)"
-[ "$(builds)" = "alpha 2.0.0 linux-x64
-alpha 2.1.0 linux-x64
-alpha 2.2.0 linux-x64" ] || fail "unexpected builds: $(builds)"
-grep -qx "plugins/demo/1.10.0/beta-1.10.0-linux-x64.plugin" "$removed" || fail "beta's last file is not among the files to delete"
+[ "$(query '[.apps.demo.plugins[].id] | join(" ")')" = "alpha beta" ] || fail "beta left the index: $(builds)"
+[ "$(query '.apps.demo.plugins[1] | "\(.description) \([.builds[].app_version] | join(" "))"')" = "What beta does, as of 1.10.0. 1.0.0 1.1.0 1.2.0 1.3.0 1.10.0" ] \
+  || fail "beta is not what its last release left: $(query '.apps.demo.plugins[1] | tojson')"
+[ "$(query '.apps.demo.plugins[0].description')" = "What alpha does, as of 2.2.0." ] || fail "alpha's description is not the newest build's"
+# Eight releases, and every build of every one of them: fifteen of the five
+# releases with three builds each, three of the three with one.
+[ "$(builds | wc -l)" -eq 18 ] || fail "expected eighteen builds of eight releases: $(builds)"
+[ "$(query '[.apps.demo.plugins[].builds[].app_version] | unique | length')" -eq 8 ] || fail "expected the builds of eight releases"
 
 # --- an app without plugins --------------------------------------------------------------
 
@@ -293,9 +303,6 @@ grep -qF "0 build(s) added, 0 already there; latest is 0.3.1" <<< "$out" || fail
 mkdir "$work/empty"
 "$registry/merge.sh" "$site" plain 0.3.2 https://github.com/Open-Breach/plain/releases/tag/v0.3.2 "$work/empty" > /dev/null
 [ "$(query '.apps.plain.latest.version')" = "0.3.2" ] || fail "latest of the app without plugins did not move"
-# Pruning leaves it alone.
-"$registry/prune.sh" "$site" "$removed" > /dev/null
-[ "$(query '.apps.plain.latest.version')" = "0.3.2" ] || fail "pruning touched an app without plugins"
 
 # What a reader does not know, the publisher keeps.
 jq '.note = "kept" | .apps.demo.channel = "stable" | .apps.demo.plugins[0].homepage = "https://example.org"' "$index" > "$work/extra.json"
@@ -307,14 +314,15 @@ merge 2.3.0 > /dev/null
 
 # --- a release that is removed ----------------------------------------------------------------
 
+# The one way a build leaves the index, and its file the bucket.
 : > "$removed"
-"$registry/prune.sh" "$site" "$removed" > /dev/null
-# Not the newest: its builds go, latest stays.
+before="$(builds)"
+# Not the newest: its builds go, latest stays, and every other release is
+# as it was.
 out="$("$registry/remove.sh" "$site" "$removed" demo 2.2.0)"
 grep -qF "registry: removed demo 2.2.0: 1 build(s)" <<< "$out" || fail "unexpected summary of the removal: $out"
-grep -qx "plugins/demo/2.2.0/alpha-2.2.0-linux-x64.plugin" "$removed" || fail "the removed release's file is not among the files to delete"
-[ "$(builds)" = "alpha 2.1.0 linux-x64
-alpha 2.3.0 linux-x64" ] || fail "unexpected builds after the removal: $(builds)"
+[ "$(cat "$removed")" = "plugins/demo/2.2.0/alpha-2.2.0-linux-x64.plugin" ] || fail "unexpected files to delete: $(cat "$removed")"
+[ "$(builds)" = "$(grep -v ' 2\.2\.0 ' <<< "$before")" ] || fail "the removal took more than the release's builds: $(builds)"
 [ "$(query '.apps.demo.latest.version')" = "2.3.0" ] || fail "removing an older release changed latest"
 # The newest: latest goes with it, and the release before is named by
 # publishing it again.
@@ -322,18 +330,39 @@ out="$("$registry/remove.sh" "$site" "$removed" demo 2.3.0)"
 grep -qF "::warning::demo 2.3.0 was the latest release of demo" <<< "$out" || fail "no word about latest: $out"
 [ "$(query '.apps.demo | has("latest")')" = false ] || fail "latest still names the removed release"
 [ "$(query '.apps.demo.channel')" = "stable" ] || fail "the removal dropped a field it does not know"
+before="$(builds)"
 merge 2.1.0 > /dev/null
 [ "$(query '.apps.demo.latest | "\(.version) \(.url)"')" = "2.1.0 $(release_url 2.1.0)" ] || fail "publishing the release before did not name it"
-[ "$(builds)" = "alpha 2.1.0 linux-x64" ] || fail "publishing the release before added builds: $(builds)"
+[ "$(builds)" = "$before" ] || fail "publishing the release before changed the builds: $(builds)"
+# A release with the builds of two plugins on two platforms.
+: > "$removed"
+out="$("$registry/remove.sh" "$site" "$removed" demo 1.10.0)"
+grep -qF "registry: removed demo 1.10.0: 3 build(s)" <<< "$out" || fail "unexpected summary of the removal: $out"
+[ "$(sort "$removed")" = "plugins/demo/1.10.0/alpha-1.10.0-linux-x64.plugin
+plugins/demo/1.10.0/alpha-1.10.0-macos-arm64.plugin
+plugins/demo/1.10.0/beta-1.10.0-linux-x64.plugin" ] || fail "unexpected files to delete: $(cat "$removed")"
+[ "$(builds)" = "$(grep -v ' 1\.10\.0 ' <<< "$before")" ] || fail "the removal took more than the release's builds: $(builds)"
 # A release the index has nothing of.
 cp "$index" "$work/before.json"
 assert_fails "$registry/remove.sh" "$site" "$removed" demo 9.9.9
+assert_fails "$registry/remove.sh" "$site" "$removed" demo 1.10.0
 assert_fails "$registry/remove.sh" "$site" "$removed" nobody 2.1.0
 cmp -s "$work/before.json" "$index" || fail "a removal that failed changed the index"
 # An app without plugins: its release is latest and nothing else.
 "$registry/remove.sh" "$site" "$removed" plain 0.3.2 > /dev/null
 [ "$(query '.apps.plain | tojson')" = "{}" ] || fail "unexpected rest of the app without plugins: $(query '.apps.plain | tojson')"
-# The last release of an app with plugins: no plugins are left.
+# A plugin leaves with its last build, and not before: beta is there until
+# the last release that carried it is removed.
+for version in 1.0.0 1.1.0 1.2.0; do
+  "$registry/remove.sh" "$site" "$removed" demo "$version" > /dev/null
+done
+[ "$(query '.apps.demo.plugins[1] | "\(.id) \([.builds[].app_version] | join(" "))"')" = "beta 1.3.0" ] || fail "beta is not down to its last build: $(builds)"
+"$registry/remove.sh" "$site" "$removed" demo 1.3.0 > /dev/null
+[ "$(query '[.apps.demo.plugins[].id] | join(" ")')" = "alpha" ] || fail "beta is still in the index without a build: $(builds)"
+[ "$(builds)" = "alpha 2.0.0 linux-x64
+alpha 2.1.0 linux-x64" ] || fail "unexpected builds after the removals: $(builds)"
+# The last releases of an app with plugins: no plugins are left.
+"$registry/remove.sh" "$site" "$removed" demo 2.0.0 > /dev/null
 "$registry/remove.sh" "$site" "$removed" demo 2.1.0 > /dev/null
 [ "$(query '.apps.demo | has("plugins")')" = false ] || fail "an app without builds still lists plugins"
 
@@ -353,4 +382,4 @@ assert_fails "$registry/remove.sh" "$site" "$removed" demo 2.1.0
 sign
 minisign -V -H -m "$index" -p "$work/registry.pub" > /dev/null || fail "the last index does not verify"
 
-echo "registry: merged, repeated, pruned, refused and removed"
+echo "registry: merged, repeated, every release kept, refused and removed"

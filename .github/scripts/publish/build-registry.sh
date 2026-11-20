@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Bring a local copy of the registry index up to date and sign it
-# (docs/registry.md): merge a release into it and prune it, or take a
-# release out of it.
+# (docs/registry.md): merge a release into it, or take a release out of it.
 #
 #   build-registry.sh SITE REMOVED_LIST release APP VERSION RELEASE_URL [INCOMING_DIR]
 #   build-registry.sh SITE REMOVED_LIST remove APP VERSION
@@ -12,6 +11,10 @@
 # (fetch-plugins.sh). The new plugin files are left under SITE/plugins/ and
 # the paths of the files that left the index are written to REMOVED_LIST,
 # both for bucket.sh push-registry.
+#
+# A release adds to the index and takes nothing out of it: the registry
+# keeps every build of every release (docs/spec.md 7.4), so REMOVED_LIST is
+# empty after a release. Files leave only with a release that is removed.
 #
 #   REGISTRY_SIGNING_KEY, REGISTRY_SIGNING_PASSWORD    as registry/sign.sh has them
 #   REGISTRY_BASE_URL, REGISTRY_PUBLISHER              as registry/merge.sh has them
@@ -59,7 +62,6 @@ case "$mode" in
   release)
     { [ "$#" -ge 6 ] && [ "$#" -le 7 ]; } || usage
     "$root/registry/merge.sh" "$site" "$app" "$version" "$6" ${7:+"$7"}
-    "$root/registry/prune.sh" "$site" "$removed"
     ;;
   remove)
     [ "$#" -eq 5 ] || usage
@@ -97,5 +99,7 @@ esac
     done < "$removed"
   fi
   echo
-  echo "Builds in the index: $(jq '[.apps[].plugins // [] | .[].builds[]] | length' "$index")"
+  # Every release stays, so both numbers only go up: this is where to see
+  # how far (docs/publisher.md, *What grows*).
+  echo "Builds in the index: $(jq '[.apps[].plugins // [] | .[].builds[]] | length' "$index"), in $(stat -c %s "$index") bytes."
 } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"

@@ -26,7 +26,9 @@
 #
 # The registry's commands touch registry/index.json, its signature, and
 # files under plugins/. A plugin file is uploaded when SITE holds it, which
-# is when a build was new, and deleted only when REMOVED_LIST names it.
+# is when a build was new, and deleted only when REMOVED_LIST names it,
+# which is when its release was removed by hand. Plugin files are never
+# pruned: the bucket keeps those of every release.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

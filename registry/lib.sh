@@ -22,8 +22,6 @@ registry_jq='
     (index("-")) as $cut
     | (if $cut then .[:$cut] else . end | split(".") | map(tonumber? // 0)) as $numbers
     | [$numbers, (if $cut then 0 else 1 end), (if $cut then .[$cut + 1:] else "" end)];
-  # The releases of an app that have a build in the index, newest first.
-  def releases: [.plugins // [] | .[].builds[].app_version] | unique | sort_by(version_key) | reverse;
   # An app without the builds of the releases $gone, and without the plugins
   # that have no build left. An app without plugins has no list of them.
   def drop_releases($gone):
