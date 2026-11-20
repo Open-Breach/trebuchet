@@ -24,6 +24,7 @@ Apps build, Trebuchet publishes.
 - [`docs/linux-packages.md`](docs/linux-packages.md) is for an app that wants its Linux packages built: how to call `linux-packages.yml` and what to bring.
 - [`docs/publisher.md`](docs/publisher.md) is for whoever runs the publisher: what starts it, its secrets, what it does to the bucket and what to do when a run fails.
 - [`docs/repositories.md`](docs/repositories.md) describes the apt and dnf repositories: the target list, the layout, the scripts and how to run the tests.
+- [`docs/registry.md`](docs/registry.md) describes the plugin registry: what an app attaches to a release, the signed list, how to verify it, and the scripts.
 - [`CLAUDE.md`](CLAUDE.md) holds the rules for agents and contributors working in this repo.
 
 ## Layout
