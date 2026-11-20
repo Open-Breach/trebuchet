@@ -9,7 +9,7 @@ name: publish
 # the app's latest version into the registry's index, adds the plugins the
 # release attached, keeps those of the last three releases, signs the index
 # and uploads the plugin files and then the index. This part runs only where
-# the repository variable REGISTRY_PUBLISH is `true`; without it nothing of
+# the repository variable PUBLISH_PLUGINS is `true`; without it nothing of
 # the registry is fetched, signed or uploaded.
 #
 # Triggers:
@@ -22,7 +22,7 @@ name: publish
 #
 # Secrets, by name only: R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT,
 # GPG_PRIVATE_KEY, GPG_PASSPHRASE, REGISTRY_SIGNING_KEY,
-# REGISTRY_SIGNING_PASSWORD. Variables: R2_BUCKET, REGISTRY_PUBLISH, and
+# REGISTRY_SIGNING_PASSWORD. Variables: R2_BUCKET, PUBLISH_PLUGINS, and
 # RUNNER_LINUX_X64 for another runner than the default, which is Depot's for
 # Open-Breach and GitHub's own for any other owner of this repository. Each
 # secret is given to the one step that needs it, and no step prints one.
@@ -77,7 +77,7 @@ jobs:
       PLUGINS: ${{ github.workspace }}/.publish/plugins
       REGISTRY_REMOVED: ${{ github.workspace }}/.publish/registry-removed
       REGISTRY_BASE_URL: https://get.openbreach.dev
-      REGISTRY: ${{ vars.REGISTRY_PUBLISH == 'true' }}
+      REGISTRY: ${{ vars.PUBLISH_PLUGINS == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -103,10 +103,10 @@ jobs:
           MODE: ${{ steps.request.outputs.mode }}
         run: |
           if [ "$MODE" = remove ]; then
-            echo "::error::the plugin registry is switched off in this repository: there is nothing to remove a release from. The repository variable REGISTRY_PUBLISH turns it on (docs/publisher.md)."
+            echo "::error::the plugin registry is switched off in this repository: there is nothing to remove a release from. The repository variable PUBLISH_PLUGINS turns it on (docs/publisher.md)."
             exit 1
           fi
-          echo "::notice::The plugin registry is switched off: nothing of it is fetched, signed or uploaded in this run. The repository variable REGISTRY_PUBLISH turns it on (docs/publisher.md)."
+          echo "::notice::The plugin registry is switched off: nothing of it is fetched, signed or uploaded in this run. The repository variable PUBLISH_PLUGINS turns it on (docs/publisher.md)."
 
       - name: tools
         run: |

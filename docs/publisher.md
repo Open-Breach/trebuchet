@@ -70,7 +70,7 @@ A package for a target that [`targets.json`](../targets.json) does not list fail
 | `GPG_PASSPHRASE` | secret | Its passphrase. Not set when the key has none. |
 | `REGISTRY_SIGNING_KEY` | secret | The registry's minisign secret key: the whole contents of the file `minisign -G` wrote. |
 | `REGISTRY_SIGNING_PASSWORD` | secret | Its password. Not set when the key was made without one. |
-| `REGISTRY_PUBLISH` | variable | `true` switches the plugin registry on. Anything else, or nothing: off. |
+| `PUBLISH_PLUGINS` | variable | `true` switches the plugin registry on. Anything else, or nothing: off. |
 | `RUNNER_LINUX_X64` | variable | Another runner label than the default. Not set here: the publisher runs on Depot's `depot-ubuntu-24.04-8`, the label Open-Breach's other repositories use. In a copy of this repository under another owner the default is GitHub's `ubuntu-24.04`. |
 
 Each secret is passed to the one step that needs it. The signing key is imported into a directory of the run, used, and deleted before anything is uploaded. No step prints a secret, and the scripts never put one on a command line.
@@ -81,9 +81,9 @@ The key in `REGISTRY_SIGNING_KEY` has to be the one whose public half is `keys/r
 
 ### The registry's switch
 
-The registry part of a run happens only where the repository variable `REGISTRY_PUBLISH` is `true`. Without it the run does everything else as before, says in a notice that the registry is switched off, and neither fetches a manifest, nor uses the registry's key, nor writes `registry/` or `plugins/` in the bucket. A run that asks to remove a release fails while the switch is off.
+The registry part of a run happens only where the repository variable `PUBLISH_PLUGINS` is `true`. Without it the run does everything else as before, says in a notice that the registry is switched off, and neither fetches a manifest, nor uses the registry's key, nor writes `registry/` or `plugins/` in the bucket. A run that asks to remove a release fails while the switch is off.
 
-Switching it on is one setting: *Settings*, *Secrets and variables*, *Actions*, *Variables*, `REGISTRY_PUBLISH` = `true`. The next release then starts the index. A release that was published while the switch was off gets into the registry by running the publisher for it again, by hand.
+Switching it on is one setting: *Settings*, *Secrets and variables*, *Actions*, *Variables*, `PUBLISH_PLUGINS` = `true`. The next release then starts the index. A release that was published while the switch was off gets into the registry by running the publisher for it again, by hand.
 
 ## The bucket
 
