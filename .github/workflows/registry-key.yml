@@ -1,0 +1,50 @@
+name: registry key
+# Proves that the secrets REGISTRY_SIGNING_KEY and REGISTRY_SIGNING_PASSWORD
+# hold the key whose public half is committed as keys/registry.pub
+# (docs/spec.md 7.5): a throwaway file is signed with them and the signature
+# is verified against the committed key. The file is one line of text, not
+# an index. Nothing is published and nothing leaves the run.
+#
+# Triggers:
+#   workflow_dispatch: by hand, after the secrets or the key were changed.
+#   push: when the signing script, this check or the public key change, on
+#     whatever branch, so that a change to them is proven before it merges.
+#     A pull request from a fork starts nothing here and gets no secret.
+#
+# The two secrets are given to the one step that signs, and no step prints
+# them. Runner: as for the other workflows of this repository.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - registry/sign.sh
+      - keys/registry.pub
+      - .github/scripts/registry/check-key.sh
+      - .github/workflows/registry-key.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: registry-key-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: sign and verify a throwaway file
+    runs-on: ${{ vars.RUNNER_LINUX_X64 || (github.repository_owner == 'Open-Breach' && 'depot-ubuntu-24.04-8' || 'ubuntu-24.04') }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends minisign
+          minisign -v
+      - name: sign a throwaway file and verify it against keys/registry.pub
+        env:
+          REGISTRY_SIGNING_KEY: ${{ secrets.REGISTRY_SIGNING_KEY }}
+          REGISTRY_SIGNING_PASSWORD: ${{ secrets.REGISTRY_SIGNING_PASSWORD }}
+        run: .github/scripts/registry/check-key.sh

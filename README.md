@@ -32,7 +32,7 @@ Apps build, Trebuchet publishes.
 - `targets.json`: the distro releases and architectures everything is built for, in one place.
 - `apt/`, `rpm/`: the scripts that build the repository indexes.
 - `install.sh`: the one-line installer served from `get.openbreach.dev`.
-- `registry/`: the scripts behind the plugin registry (not started).
+- `registry/`: the scripts behind the plugin registry.
 - `keys/`: the public signing keys.
 - `docs/`: the spec and the documentation.
 - `tests/`: the fixture package and the tests CI runs.

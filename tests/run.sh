@@ -6,7 +6,7 @@
 # Needs jq, dpkg-deb, apt-ftparchive (apt-utils), rpmbuild (rpm),
 # createrepo_c and gpg; on Debian or Ubuntu:
 #
-#   sudo apt-get install apt-utils createrepo-c rpm jq gnupg
+#   sudo apt-get install apt-utils createrepo-c rpm jq gnupg minisign
 #
 # The tests that install from a repository run apt and dnf in the targets'
 # containers and need docker. tests/test-publish.sh also needs the AWS CLI
