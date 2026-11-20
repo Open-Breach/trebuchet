@@ -1,7 +1,5 @@
 # Installing Open-Breach apps on Linux
 
-> **Status:** the repositories on `get.openbreach.dev` go live with the first run of the publisher. Until then the steps below describe what will work, and the tarballs on each app's GitHub Releases page are the way to install.
-
 Open-Breach apps come as native packages from Open-Breach's own apt and dnf repositories. You add the repository once; after that the apps install, update and uninstall with the tools your system already has.
 
 The examples install Rick, the file manager. Any other package name works the same way.
@@ -10,6 +8,12 @@ The examples install Rick, the file manager. Any other package name works the sa
 
 ```sh
 curl -fsSL https://get.openbreach.dev/install.sh | sh -s rick
+```
+
+On a system without curl, wget does the same:
+
+```sh
+wget -qO- https://get.openbreach.dev/install.sh | sh -s rick
 ```
 
 The script reads `/etc/os-release`, adds the Open-Breach repository for your distro together with its signing key, and installs the package with `apt` or `dnf`. It asks for `sudo` when it is not run as root. It does nothing else, and it is short enough to read first: [`install.sh`](../install.sh).
