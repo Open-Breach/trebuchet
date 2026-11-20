@@ -55,7 +55,9 @@ jobs:
   # with files beside the binary, a desktop entry, icons, dependencies per
   # distro and per target, and a smoke command of its own. The build adds a
   # file to the uploaded folder where its build is also the tarball, and
-  # the smoke command looks for it there and nowhere else.
+  # the smoke command looks for it there and nowhere else. Every build also
+  # puts a file aside for the smoke test only, and the smoke command looks
+  # for it in the test's folder and not among the files for the release.
   cargo:
     needs: notice
     uses: ./.github/workflows/linux-packages.yml
@@ -82,6 +84,37 @@ jobs:
           "ubuntu-24.04": ["bash (>= 5)"],
           "fedora": ["bash >= 4", "coreutils"]
         }
+
+  # What a release would get: the artifacts gathered by the name the
+  # workflow's own release job gathers them by, as does a caller that writes
+  # its release itself. The packages, the tarballs and the files the builds
+  # added are there; the files for the smoke tests are not.
+  gathered:
+    needs: cargo
+    runs-on: ${{ vars.RUNNER_LINUX_X64 || (github.repository_owner == 'Open-Breach' && 'depot-ubuntu-24.04-8' || 'ubuntu-24.04') }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: linux_trebuchet-fixture_*
+          path: gathered
+          merge-multiple: true
+      - name: release files only
+        run: |
+          ls -l gathered
+          for kind in '*.deb' '*.rpm' '*.tar.gz' '*.built-on.txt'; do
+            if [ -z "$(find gathered -type f -name "$kind")" ]; then
+              echo "::error::no $kind among the gathered artifacts"
+              exit 1
+            fi
+          done
+          other="$(find gathered -mindepth 1 ! -name '*.deb' ! -name '*.rpm' ! -name '*.tar.gz' ! -name '*.built-on.txt')"
+          if [ -n "$other" ]; then
+            echo "::error::not release files, and gathered all the same:"
+            echo "$other"
+            exit 1
+          fi
+          echo "only packages, tarballs and the builds' added files"
 
   # The folder a prebuilt app brings: here a shell script that prints the
   # version, with a data file beside it. Uploaded as plain files, so it

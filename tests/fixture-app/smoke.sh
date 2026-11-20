@@ -6,7 +6,8 @@
 #
 #   TREBUCHET_SMOKE        package or tarball
 #   TREBUCHET_SMOKE_DIR    the unpacked tarball; empty for the package
-#   TREBUCHET_DIST         the files the build job uploaded
+#   TREBUCHET_DIST         the files the build job uploaded for the release
+#   TREBUCHET_SMOKE_FILES  the files the build job put aside for this test
 #   TREBUCHET_TARGET, TREBUCHET_ARCH, TREBUCHET_VERSION
 set -euo pipefail
 
@@ -19,6 +20,7 @@ target="${TREBUCHET_TARGET:?}"
 arch="${TREBUCHET_ARCH:?}"
 version="${TREBUCHET_VERSION:?}"
 dist="${TREBUCHET_DIST:?}"
+files="${TREBUCHET_SMOKE_FILES:?}"
 what="${TREBUCHET_SMOKE:-}"
 
 # Started where the call's working-directory points, in the app's checkout.
@@ -56,4 +58,13 @@ else
   [ ! -e "$added" ] || fail "$(basename "$added") from a build that made no tarball"
   [ "$what" = package ] || fail "a tarball is tested where none was built"
 fi
+
+# The file the build put aside for this test: in the test's folder, this
+# job's own although every job names it alike, and not among the files for
+# the release. Nothing for the release is in the test's folder either.
+aside="$files/for-the-test.txt"
+[ -f "$aside" ] || fail "no for-the-test.txt in the folder for the smoke test, $files"
+grep -qx "for the smoke test of $target $arch" "$aside" || fail "for-the-test.txt is not this build's"
+[ -z "$(find "$dist" -name 'for-the-test.txt')" ] || fail "for-the-test.txt is among the files for the release"
+[ "$(find "$files" -mindepth 1 | wc -l)" = 1 ] || fail "the folder for the smoke test holds more than the one file: $(ls -A "$files")"
 echo "fixture smoke test passed for the $what"
