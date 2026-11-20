@@ -6,7 +6,8 @@
 # the call names a smoke command, the app's own checks run as well: after
 # the package is installed, and once more for the unpacked tarball.
 #
-#   smoke.sh DIR    the directory with the package, and maybe the tarball
+#   smoke.sh DIR    the directory with the package, and maybe the tarball:
+#                   the build job's folder for the release
 #
 #   TREBUCHET_APP, TREBUCHET_BINARY, TREBUCHET_PACKAGE_VERSION
 #   TREBUCHET_FORMAT               deb or rpm
@@ -15,6 +16,8 @@
 #   TREBUCHET_WORKING_DIRECTORY    the call's working-directory input: where
 #                                  the smoke command runs, in the checkout
 #                                  of the app this script is started from
+#   TREBUCHET_SMOKE_FILES          the folder with what the build job put
+#                                  aside for this test; it need not exist
 #
 # The smoke command is told what it is testing:
 #
@@ -22,7 +25,10 @@
 #                          is on the PATH. tarball: the tarball is unpacked.
 #   TREBUCHET_SMOKE_DIR    for the tarball, the unpacked folder with the
 #                          binary at its top level; empty for the package
-#   TREBUCHET_DIST         DIR, with every file the build job uploaded
+#   TREBUCHET_DIST         DIR, with every file the build job uploaded for
+#                          the release
+#   TREBUCHET_SMOKE_FILES  the folder of files for this test only, which no
+#                          release gets; empty where the build put none there
 #
 # The app's checks run before anything but the package is installed: the
 # validator of the desktop entry comes last, so that a library it brings
@@ -41,6 +47,12 @@ desktop="${TREBUCHET_DESKTOP_FILE:-}"
 extra="${TREBUCHET_SMOKE_COMMAND:-}"
 workdir="$PWD/${TREBUCHET_WORKING_DIRECTORY:-.}"
 dir="$(cd "${1:?usage: smoke.sh DIR}" && pwd)"
+# Always a folder for the smoke command, empty where the build put nothing
+# aside and no artifact came.
+files="${TREBUCHET_SMOKE_FILES:-}"
+if [ -z "$files" ]; then files="$(mktemp -d)"; fi
+mkdir -p "$files"
+files="$(cd "$files" && pwd)"
 
 if [ -n "$extra" ] && [ ! -d "$workdir" ]; then
   die "smoke-command: no $workdir: the app's repository is not checked out here"
@@ -54,7 +66,7 @@ smoke_command() {
   (
     cd "$workdir"
     TREBUCHET_SMOKE="$what" TREBUCHET_SMOKE_DIR="$unpacked" TREBUCHET_DIST="$dir" \
-      bash -euo pipefail -c "$extra"
+      TREBUCHET_SMOKE_FILES="$files" bash -euo pipefail -c "$extra"
   ) || die "the smoke command failed for the $what"
   echo "smoke command passed for the $what"
 }

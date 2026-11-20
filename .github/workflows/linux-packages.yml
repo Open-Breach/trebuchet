@@ -7,7 +7,9 @@ name: linux-packages
 # it is attested and attached to that GitHub Release of the calling
 # repository. A build may add files of its own to the folder that is
 # uploaded, and the smoke test runs one more command of the app's where the
-# call names one.
+# call names one. Files that only that command needs travel in a second
+# folder, from a build to its own smoke test and no further: they are never
+# attested and never reach a release.
 #
 # How to call it, and what the app has to bring: docs/linux-packages.md.
 #
@@ -212,8 +214,13 @@ jobs:
           {
             echo "SCRIPTS=$RUNNER_TEMP/trebuchet/.github/scripts/linux-packages"
             echo "TREBUCHET_DIST=$RUNNER_TEMP/trebuchet-dist"
+            echo "TREBUCHET_SMOKE_FILES=$RUNNER_TEMP/trebuchet-smoke-files"
             echo "TREBUCHET_PREBUILT=$RUNNER_TEMP/trebuchet-prebuilt"
           } >> "$GITHUB_ENV"
+          # The two folders a build hands files on through: one for the
+          # release, one for the smoke test only. Both are there, and empty,
+          # when the build command starts.
+          mkdir -p "$RUNNER_TEMP/trebuchet-dist" "$RUNNER_TEMP/trebuchet-smoke-files"
       # This workflow's scripts, moved out of the workspace so that the app
       # is built from a checkout with nothing else in it.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -311,13 +318,21 @@ jobs:
           TREBUCHET_ICON: ${{ inputs.icon }}
         run: |
           "$SCRIPTS/tarball.sh"
-      # The whole folder: the package, the tarball, and whatever the build
-      # command put there itself.
+      # The folder for the release, whole: the package, the tarball, and
+      # whatever the build command put there itself.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linux_${{ inputs.app }}_${{ matrix.target }}_${{ matrix.arch }}
           path: ${{ env.TREBUCHET_DIST }}/
           if-no-files-found: error
+      # The folder for the smoke test, as an artifact of its own under
+      # another name: the smoke job of this target takes it, the release job
+      # never does. Most builds put nothing there, and then there is none.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-smoke_${{ inputs.app }}_${{ matrix.target }}_${{ matrix.arch }}
+          path: ${{ env.TREBUCHET_SMOKE_FILES }}/
+          if-no-files-found: ignore
 
   # Each package as a user gets it: installed in a fresh container of the
   # target's image, with nothing of the build in it.
@@ -362,6 +377,7 @@ jobs:
           {
             echo "SCRIPTS=$RUNNER_TEMP/trebuchet/.github/scripts/linux-packages"
             echo "TREBUCHET_DIST=$RUNNER_TEMP/trebuchet-dist"
+            echo "TREBUCHET_SMOKE_FILES=$RUNNER_TEMP/trebuchet-smoke-files"
           } >> "$GITHUB_ENV"
       # This workflow's scripts, moved out of the workspace, which the
       # checkout of the app below would empty.
@@ -385,6 +401,15 @@ jobs:
         with:
           name: linux_${{ inputs.app }}_${{ matrix.target }}_${{ matrix.arch }}
           path: ${{ env.TREBUCHET_DIST }}
+      # What the build put aside for this test, where it put anything. Asked
+      # for as a pattern, although it is one name: a pattern that matches
+      # nothing downloads nothing, and a name that is not there fails the
+      # step. smoke.sh makes the folder where nothing came.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: linux-smoke_${{ inputs.app }}_${{ matrix.target }}_${{ matrix.arch }}
+          path: ${{ env.TREBUCHET_SMOKE_FILES }}
+          merge-multiple: true
       - name: smoke test
         env:
           TREBUCHET_SMOKE_COMMAND: ${{ inputs.smoke-command }}
@@ -393,10 +418,12 @@ jobs:
           "$SCRIPTS/smoke.sh" "$TREBUCHET_DIST"
 
   # Only when every package passed its smoke test. The files of a release
-  # are attested before they are attached: every file of the downloaded
-  # artifacts, so the packages, the tarballs and what the builds added
-  # (docs/spec.md, decision 10). A test run names no release tag, never
-  # gets here, and attests nothing.
+  # are attested before they are attached: every file of the builds' folders
+  # for the release, so the packages, the tarballs and what the builds added
+  # (docs/spec.md, decision 10). What a build put aside for its smoke test
+  # is in another artifact, which this job does not download: none of it is
+  # attested or attached. A test run names no release tag, never gets here,
+  # and attests nothing.
   release:
     name: attach to the release
     if: inputs.release-tag != ''
@@ -411,7 +438,8 @@ jobs:
           path: .trebuchet
           persist-credentials: false
       # An app name has no underscore in it, so the pattern takes this app's
-      # artifacts and no other's.
+      # artifacts and no other's. The artifacts for the smoke tests are
+      # named linux-smoke_..., which it does not match.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: linux_${{ inputs.app }}_*
