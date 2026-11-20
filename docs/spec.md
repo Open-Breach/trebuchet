@@ -279,5 +279,5 @@ This section is the one place that names secrets; the apps' specs point here and
 5. Add the macOS and Windows reusable workflows for Rick.
 6. Add `flake.nix` to each Rust repo.
 7. Add the plugin registry: the publisher's side here (7.4, 7.5) and the plugin packages (4.3); Rick's side in the Rick repository.
-8. Add the attest step to `linux-packages.yml`, with the two permissions in its documented call and the skip for a private caller (section 3, *Build attestations*). Not built as of 2026-11-19.
+8. Done 2026-11-20: the attest step in `linux-packages.yml`, with the two permissions in its documented call and the skip for a private caller (section 3, *Build attestations*).
 9. Done 2026-11-18: domain, bucket, custom domain and token. Remaining: put the token into Trebuchet's secrets.

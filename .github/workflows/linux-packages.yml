@@ -4,9 +4,10 @@ name: linux-packages
 # container image, makes the .deb or .rpm, runs the smoke test in a fresh
 # container of the same image, and uploads the result as an artifact. One
 # target per architecture also makes the tarball. With `release-tag`, all of
-# it is attached to that GitHub Release of the calling repository. A build
-# may add files of its own to the folder that is uploaded, and the smoke
-# test runs one more command of the app's where the call names one.
+# it is attested and attached to that GitHub Release of the calling
+# repository. A build may add files of its own to the folder that is
+# uploaded, and the smoke test runs one more command of the app's where the
+# call names one.
 #
 # How to call it, and what the app has to bring: docs/linux-packages.md.
 #
@@ -60,7 +61,7 @@ on:
         type: string
         default: ""
       release-tag:
-        description: "Tag of the GitHub Release to attach the files to. Empty: artifacts only."
+        description: "Tag of the GitHub Release to attach the files to, attested first where the calling repository is public. Empty: artifacts only, and nothing is attested."
         type: string
         default: ""
       build-deps:
@@ -110,9 +111,10 @@ on:
 
 # No `permissions` at the top: a called workflow can only narrow what the
 # calling job grants, and asking for more than that fails the whole call. The
-# jobs that build and test narrow themselves to reading; the job that attaches
-# to the release uses what the caller granted, which has to include
-# `contents: write` when `release-tag` is set.
+# jobs that build and test narrow themselves to reading; the job that attests
+# and attaches uses what the caller granted. When `release-tag` is set that
+# has to include `contents: write`, to attach, and for a public repository
+# `id-token: write` and `attestations: write`, to attest.
 
 jobs:
   plan:
@@ -390,7 +392,11 @@ jobs:
         run: |
           "$SCRIPTS/smoke.sh" "$TREBUCHET_DIST"
 
-  # Only when every package passed its smoke test.
+  # Only when every package passed its smoke test. The files of a release
+  # are attested before they are attached: every file of the downloaded
+  # artifacts, so the packages, the tarballs and what the builds added
+  # (docs/spec.md, decision 10). A test run names no release tag, never
+  # gets here, and attests nothing.
   release:
     name: attach to the release
     if: inputs.release-tag != ''
@@ -411,6 +417,19 @@ jobs:
           pattern: linux_${{ inputs.app }}_*
           path: .trebuchet-dist
           merge-multiple: true
+      # Attested where the calling repository is public; skipped, with a
+      # line in the job summary, where it is private. GitHub is asked which.
+      - name: public or private
+        id: attestable
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          .trebuchet/.github/scripts/linux-packages/attestable.sh
+      - name: attest
+        if: steps.attestable.outputs.attest == 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: .trebuchet-dist/*
       - name: attach
         env:
           GH_TOKEN: ${{ github.token }}
