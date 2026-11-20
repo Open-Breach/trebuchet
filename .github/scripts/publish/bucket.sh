@@ -5,6 +5,13 @@
 #   bucket.sh pull SITE                  the pool of every target, into SITE
 #   bucket.sh push SITE REMOVED_LIST     SITE into the bucket
 #
+# And the same for the plugin registry (docs/registry.md), whose index is
+# SITE/registry/index.json with its signature beside it:
+#
+#   bucket.sh pull-registry SITE                  the index and its signature
+#   bucket.sh push-registry SITE REMOVED_LIST     new plugin files, then the
+#                                                 index, then the deletions
+#
 #   R2_BUCKET                                     the bucket's name
 #   R2_ENDPOINT                                   its S3 endpoint
 #   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY      a token for that bucket
@@ -16,6 +23,10 @@
 # only when REMOVED_LIST names it. The index directories (dists/<suite>,
 # repodata) are rebuilt whole on every run, so there what the new index no
 # longer has is deleted.
+#
+# The registry's commands touch registry/index.json, its signature, and
+# files under plugins/. A plugin file is uploaded when SITE holds it, which
+# is when a build was new, and deleted only when REMOVED_LIST names it.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,8 +34,12 @@ targets="${TREBUCHET_TARGETS:-$here/../../../targets.json}"
 
 command="${1:-}"
 site="${2:-}"
-if [ -z "$site" ] || { [ "$command" != pull ] && [ "$command" != push ]; }; then
-  echo "usage: $0 pull SITE | push SITE REMOVED_LIST" >&2
+case "$command" in
+  pull | push | pull-registry | push-registry) ;;
+  *) site="" ;;
+esac
+if [ -z "$site" ]; then
+  echo "usage: $0 pull SITE | push SITE REMOVED_LIST | pull-registry SITE | push-registry SITE REMOVED_LIST" >&2
   exit 2
 fi
 bucket="s3://${R2_BUCKET:?}"
@@ -50,6 +65,77 @@ mapfile -t arches < <(jq -r '.arches[].rpm' "$targets")
 # the CDN may keep them for a moment only. Packages get no header.
 index_cache="public, max-age=60"
 static_cache="public, max-age=300"
+# A plugin file never changes once it is published (docs/spec.md 7.2).
+plugin_cache="public, max-age=31536000, immutable"
+
+# --- the plugin registry ------------------------------------------------------
+
+if [ "$command" = pull-registry ]; then
+  mkdir -p "$site/registry"
+  for file in index.json index.json.minisig; do
+    key="registry/$file"
+    # A file that is not there is a registry that has not started, and is
+    # told apart from a bucket that did not answer: a run that could not
+    # read the index must never start a new one over it.
+    if out="$(aws --endpoint-url "$R2_ENDPOINT" s3api head-object --bucket "$R2_BUCKET" --key "$key" 2>&1)"; then
+      s3 cp "$bucket/$key" "$site/registry/$file" --no-progress
+    elif grep -q -e '(404)' -e 'Not Found' <<< "$out"; then
+      echo "no $key in the bucket"
+    else
+      echo "::error::the bucket did not say whether it holds $key"
+      exit 1
+    fi
+  done
+  exit 0
+fi
+
+if [ "$command" = push-registry ]; then
+  removed="${3:?usage: $0 push-registry SITE REMOVED_LIST}"
+  for file in index.json index.json.minisig; do
+    [ -s "$site/registry/$file" ] || {
+      echo "::error::no registry/$file to upload: the index goes up with its signature or not at all"
+      exit 1
+    }
+  done
+  # 1. The plugin files, before the index names them.
+  if [ -d "$site/plugins" ]; then
+    while IFS= read -r path; do
+      [[ "$path" =~ ^plugins/[a-z0-9][a-z0-9+.-]+/[0-9A-Za-z.~+-]+/[A-Za-z0-9][A-Za-z0-9._+-]*$ ]] || {
+        echo "::error::refusing to upload $path: not a plugin file of the registry"
+        exit 1
+      }
+      s3 cp "$site/$path" "$bucket/$path" --no-progress --cache-control "$plugin_cache" \
+        --content-type "application/octet-stream"
+    done < <(cd "$site" && find plugins -type f | sort)
+  fi
+  # 2. The index, then its signature. Every file the index names is there.
+  s3 cp "$site/registry/index.json" "$bucket/registry/index.json" --no-progress --cache-control "$index_cache" \
+    --content-type "application/json"
+  s3 cp "$site/registry/index.json.minisig" "$bucket/registry/index.json.minisig" --no-progress --cache-control "$index_cache" \
+    --content-type "text/plain; charset=utf-8"
+  # 3. The files of the builds that left the index, by name. Last: the index
+  #    that is served no longer names them.
+  while IFS= read -r path; do
+    case "$path" in
+      "") ;;
+      *..* | */) echo "::error::refusing to delete $path: not a plugin file of the registry" && exit 1 ;;
+      plugins/*/*/*)
+        [[ "$path" =~ ^plugins/[^/]+/[^/]+/[A-Za-z0-9][A-Za-z0-9._+-]*$ ]] || {
+          echo "::error::refusing to delete $path: not a plugin file of the registry"
+          exit 1
+        }
+        s3 rm "$bucket/$path"
+        ;;
+      *)
+        echo "::error::refusing to delete $path: not a plugin file of the registry"
+        exit 1
+        ;;
+    esac
+  done < "$removed"
+  exit 0
+fi
+
+# --- the package repositories ---------------------------------------------------
 
 if [ "$command" = pull ]; then
   for suite in "${suites[@]}"; do

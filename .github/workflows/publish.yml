@@ -5,17 +5,27 @@ name: publish
 # result to the bucket behind get.openbreach.dev (docs/spec.md, section 3).
 # How to run it and what to do when it fails: docs/publisher.md.
 #
+# In the same run it keeps the plugin registry (docs/registry.md): it writes
+# the app's latest version into the registry's index, adds the plugins the
+# release attached, keeps those of the last three releases, signs the index
+# and uploads the plugin files and then the index. This part runs only where
+# the repository variable PUBLISH_PLUGINS is `true`; without it nothing of
+# the registry is fetched, signed or uploaded.
+#
 # Triggers:
 #   repository_dispatch, type `release`: sent by an app's release workflow,
 #     with client_payload { app, version, release_url }.
 #   workflow_dispatch: the same three values by hand, to repeat a publish;
-#     or none of them, to rebuild and sign the repositories as they are.
+#     or none of them, to rebuild and sign the repositories as they are; or
+#     an app and a version with `remove`, to take a release that was yanked
+#     out of the registry.
 #
 # Secrets, by name only: R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT,
-# GPG_PRIVATE_KEY, GPG_PASSPHRASE. Variables: R2_BUCKET, and RUNNER_LINUX_X64
-# for another runner than the default, which is Depot's for Open-Breach and
-# GitHub's own for any other owner of this repository. Each secret is given
-# to the one step that needs it, and no step prints one.
+# GPG_PRIVATE_KEY, GPG_PASSPHRASE, REGISTRY_SIGNING_KEY,
+# REGISTRY_SIGNING_PASSWORD. Variables: R2_BUCKET, PUBLISH_PLUGINS, and
+# RUNNER_LINUX_X64 for another runner than the default, which is Depot's for
+# Open-Breach and GitHub's own for any other owner of this repository. Each
+# secret is given to the one step that needs it, and no step prints one.
 on:
   repository_dispatch:
     types: [release]
@@ -33,6 +43,10 @@ on:
         description: "URL of the GitHub Release, https://github.com/<owner>/<repository>/releases/tag/<tag>"
         type: string
         default: ""
+      remove:
+        description: "Take this release out of the plugin registry instead of publishing it. Needs app and version."
+        type: boolean
+        default: false
 
 # One publish at a time: two apps never rebuild the indexes at once. A
 # running publish is never cancelled, and `queue: max` lets every waiting
@@ -57,6 +71,13 @@ jobs:
       INCOMING: ${{ github.workspace }}/.publish/incoming
       REMOVED: ${{ github.workspace }}/.publish/removed
       GNUPGHOME: ${{ github.workspace }}/.publish/gnupg
+      # The plugin registry: what the release attached for it, the files
+      # that left its index, the address it is served at, and whether this
+      # repository keeps one at all.
+      PLUGINS: ${{ github.workspace }}/.publish/plugins
+      REGISTRY_REMOVED: ${{ github.workspace }}/.publish/registry-removed
+      REGISTRY_BASE_URL: https://get.openbreach.dev
+      REGISTRY: ${{ vars.PUBLISH_PLUGINS == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -71,12 +92,26 @@ jobs:
           PUBLISH_APP: ${{ github.event.client_payload.app || inputs.app }}
           PUBLISH_VERSION: ${{ github.event.client_payload.version || inputs.version }}
           PUBLISH_RELEASE_URL: ${{ github.event.client_payload.release_url || inputs.release-url }}
+          PUBLISH_REMOVE: ${{ inputs.remove }}
         run: .github/scripts/publish/request.sh
+
+      # Said once, where the run starts, so that nobody reads a green run as
+      # a published registry.
+      - name: the plugin registry is switched off
+        if: env.REGISTRY != 'true'
+        env:
+          MODE: ${{ steps.request.outputs.mode }}
+        run: |
+          if [ "$MODE" = remove ]; then
+            echo "::error::the plugin registry is switched off in this repository: there is nothing to remove a release from. The repository variable PUBLISH_PLUGINS turns it on (docs/publisher.md)."
+            exit 1
+          fi
+          echo "::notice::The plugin registry is switched off: nothing of it is fetched, signed or uploaded in this run. The repository variable PUBLISH_PLUGINS turns it on (docs/publisher.md)."
 
       - name: tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends apt-utils createrepo-c rpm jq gnupg
+          sudo apt-get install -y --no-install-recommends apt-utils createrepo-c rpm jq gnupg minisign
           aws --version
           gh --version | head -n 1
 
@@ -90,7 +125,16 @@ jobs:
           PUBLISH_PACKAGE_VERSION: ${{ steps.request.outputs.package-version }}
         run: .github/scripts/publish/fetch.sh "$INCOMING"
 
+      - name: fetch the release's plugins
+        if: steps.request.outputs.mode == 'release' && env.REGISTRY == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLISH_REPOSITORY: ${{ steps.request.outputs.repository }}
+          PUBLISH_TAG: ${{ steps.request.outputs.tag }}
+        run: .github/scripts/publish/fetch-plugins.sh "$PLUGINS"
+
       - name: mirror the pool from the bucket
+        if: steps.request.outputs.mode != 'remove'
         env:
           R2_BUCKET: ${{ vars.R2_BUCKET }}
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
@@ -98,12 +142,23 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: .github/scripts/publish/bucket.sh pull "$SITE"
 
+      - name: the registry's index from the bucket
+        if: steps.request.outputs.mode != 'republish' && env.REGISTRY == 'true'
+        env:
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: .github/scripts/publish/bucket.sh pull-registry "$SITE"
+
       - name: signing key
+        if: steps.request.outputs.mode != 'remove'
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
         run: .github/scripts/publish/import-key.sh keys/openbreach.gpg
 
       - name: add, prune, index and sign
+        if: steps.request.outputs.mode != 'remove'
         env:
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
           MODE: ${{ steps.request.outputs.mode }}
@@ -114,6 +169,30 @@ jobs:
             .github/scripts/publish/build-site.sh "$SITE" "$REMOVED"
           fi
 
+      # The registry's index: the bucket's own is verified against
+      # keys/registry.pub, the release is merged into it or taken out of it,
+      # and the result is signed. Before anything is uploaded: a plugin file
+      # that is not what its manifest says stops the run here, with the
+      # bucket untouched. The registry's key exists as a file only inside
+      # the script that signs.
+      - name: "registry: merge, prune and sign"
+        if: steps.request.outputs.mode != 'republish' && env.REGISTRY == 'true'
+        env:
+          REGISTRY_SIGNING_KEY: ${{ secrets.REGISTRY_SIGNING_KEY }}
+          REGISTRY_SIGNING_PASSWORD: ${{ secrets.REGISTRY_SIGNING_PASSWORD }}
+          MODE: ${{ steps.request.outputs.mode }}
+          PUBLISH_APP: ${{ steps.request.outputs.app }}
+          PUBLISH_PACKAGE_VERSION: ${{ steps.request.outputs.package-version }}
+          PUBLISH_RELEASE_URL: ${{ steps.request.outputs.release-url }}
+        run: |
+          if [ "$MODE" = release ]; then
+            .github/scripts/publish/build-registry.sh "$SITE" "$REGISTRY_REMOVED" release \
+              "$PUBLISH_APP" "$PUBLISH_PACKAGE_VERSION" "$PUBLISH_RELEASE_URL" "$PLUGINS"
+          else
+            .github/scripts/publish/build-registry.sh "$SITE" "$REGISTRY_REMOVED" remove \
+              "$PUBLISH_APP" "$PUBLISH_PACKAGE_VERSION"
+          fi
+
       # The key is gone before anything is sent anywhere.
       - name: remove the signing key
         if: always()
@@ -122,6 +201,7 @@ jobs:
           rm -rf "$GNUPGHOME"
 
       - name: sync to the bucket
+        if: steps.request.outputs.mode != 'remove'
         env:
           R2_BUCKET: ${{ vars.R2_BUCKET }}
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
@@ -129,7 +209,36 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: .github/scripts/publish/bucket.sh push "$SITE" "$REMOVED"
 
+      # After the packages: a deb or an rpm of a plugin is in its repository
+      # before the registry's index changes.
+      - name: sync the registry to the bucket
+        if: steps.request.outputs.mode != 'republish' && env.REGISTRY == 'true'
+        env:
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: .github/scripts/publish/bucket.sh push-registry "$SITE" "$REGISTRY_REMOVED"
+
+      # What is served now, read the way an app reads it: the index verifies
+      # against keys/registry.pub, and every plugin file of this release
+      # downloads with the size and the SHA-256 the index names.
+      - name: read the registry as an app does
+        if: steps.request.outputs.mode != 'republish' && env.REGISTRY == 'true'
+        env:
+          MODE: ${{ steps.request.outputs.mode }}
+          PUBLISH_APP: ${{ steps.request.outputs.app }}
+          PUBLISH_PACKAGE_VERSION: ${{ steps.request.outputs.package-version }}
+          TREBUCHET_REGISTRY_FRESH: "1"
+        run: |
+          if [ "$MODE" = release ]; then
+            registry/check.sh "$REGISTRY_BASE_URL" "$PUBLISH_APP" "$PUBLISH_PACKAGE_VERSION"
+          else
+            registry/check.sh --index "$REGISTRY_BASE_URL"
+          fi
+
       - name: summary
+        if: steps.request.outputs.mode != 'remove'
         env:
           MODE: ${{ steps.request.outputs.mode }}
           PUBLISH_APP: ${{ steps.request.outputs.app }}
