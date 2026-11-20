@@ -258,7 +258,7 @@ This section is the one place that names secrets; the apps' specs point here and
 
 ## 10. Per-app notes
 
-- **Rick**: already ships tarballs for Linux x64 and arm64, macOS arm64 and Windows x64, and already has the tarball installer. Adds deb, rpm, AUR, flake, DMG with notarisation, Inno Setup, winget, and the plugin registry (7.3). Plugins split into packages as in 4.3. Rick's side of the registry — what fits, how a plugin is installed, when one is suggested — is `specs/plugin-distribution.md` in the Rick repository.
+- **Rick**: already ships tarballs for Linux x64 and arm64, macOS arm64 and Windows x64, and already has the tarball installer. Adds deb, rpm, AUR, flake, DMG with notarisation, Inno Setup, winget, and the plugin registry (7.3). Of these the deb and the rpm are built: since 2026-11-20 Rick's Linux tarballs, debs and rpms run through `linux-packages.yml`. Its release workflow calls it, with the dependencies named by hand per distribution, a smoke command of its own, and its plugin files added from the tarball's build (Open-Breach/rick#282, merged into Rick's `dev`). They reach users with Rick's next release, the first to carry packages and the first the publisher is told of. Plugins split into packages as in 4.3. Rick's side of the registry — what fits, how a plugin is installed, when one is suggested — is `specs/plugin-distribution.md` in the Rick repository.
 - **Meeseeks**: Linux only. Keeps its tarball and README-as-release-notes workflow; adds deb, rpm, AUR and flake through the same reusable workflow. arm64 is new and untested. The GTK 4.14 floor stays: Meeseeks leaves out, with `exclude` in its call, every target in `targets.json` whose release ships an older GTK, until the floor is revisited or that release leaves the list.
 - **Gossip**: CLI first, so no desktop file or icon initially; the workflow treats those as optional. Gets deb, rpm, AUR, flake, Homebrew formula (not cask) and winget. When the GUI lands, the desktop entry and icon are added to the same call.
 - **flowcpt** (planned): Flutter desktop build, closed source, private repo. Calls the public reusable workflow with a prebuilt artifact folder; runtime dependencies (GTK 3 and the Flutter Linux stack) declared in the call; licence text shipped in the package instead of Apache-2.0. Not in the plugin registry.
@@ -277,7 +277,7 @@ This section is the one place that names secrets; the apps' specs point here and
 
 1. Done 2026-11-18: `Open-Breach/trebuchet` created with this document as `docs/spec.md`.
 2. Generate the GPG key, create the AUR account, confirm Apple credentials, enable Depot.
-3. Implement `linux-packages.yml` and the publisher first, test them with Rick, then Meeseeks and Gossip.
+3. Implement `linux-packages.yml` and the publisher first, test them with Rick, then Meeseeks and Gossip. Done 2026-11-20 for `linux-packages.yml`: Rick's release workflow builds its Linux packages and tarballs through it, proven by dry runs that ended in draft releases. Remaining: the publisher's first run, which comes with Rick's first published release that carries packages; then Meeseeks and Gossip.
 4. Add the AUR, Homebrew and winget publish steps.
 5. Add the macOS and Windows reusable workflows for Rick.
 6. Add `flake.nix` to each Rust repo.
