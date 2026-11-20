@@ -85,6 +85,15 @@ Everything a run does for plugins happens only where the repository variable `PU
 
 Switching it on is one setting: *Settings*, *Secrets and variables*, *Actions*, *Variables*, `PUBLISH_PLUGINS` = `true`. The next release then starts the index and brings its plugin packages. A release that was published while the switch was off gets its plugins published by running the publisher for it again, by hand.
 
+Before the first run with the switch on:
+
+1. Start the workflow *registry key* by hand. It has to pass: the two secrets are then the key of `keys/registry.pub`.
+2. Set `PUBLISH_PLUGINS` to `true`.
+3. Publish a release, or run the publisher by hand for one that is out. The run's last step reads the registry back from `get.openbreach.dev`.
+4. From a checkout, `registry/check.sh https://get.openbreach.dev` reads the whole list and every file it names, with the committed key.
+
+Switching it off again stops the next run from touching the registry. It takes nothing back: what was published stays served until it is removed.
+
 ## The bucket
 
 ```

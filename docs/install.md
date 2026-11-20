@@ -147,15 +147,41 @@ gh attestation verify rick_1.2.3_ubuntu-24.04_amd64.deb --owner Open-Breach --si
 
 `--signer-repo` names this repository because its workflow builds the packages, for whichever app. The command fails for a file that was changed after it was built, and for one that was built anywhere else. An attestation says where a file comes from, not that it is safe.
 
+## Plugins
+
+An app with plugins has the ones every install needs inside its own package. The others are packages of their own, named `<app>-plugin-<id>`, and install like any package once the repository is added:
+
+```sh
+sudo apt install rick-plugin-git
+sudo dnf install rick-plugin-git
+```
+
+The one-liner takes the same name, and brings the app with the plugin:
+
+```sh
+curl -fsSL https://get.openbreach.dev/install.sh | sh -s rick-plugin-git
+```
+
+`rick-plugins` is all of Rick's plugins in one name. `apt search rick-plugin` and `dnf search rick-plugin` list them.
+
+A plugin is built together with one version of its app and fits no other, so each plugin package asks for the app in exactly its own version. You do not have to think about it: installing a plugin installs the app that matches, an upgrade moves the two together, and the package manager refuses a combination that would not work.
+
+A Rick from a package gets its plugins this way, not from the plugin list inside Rick: there Rick shows the command above and downloads nothing.
+
 ## Updating, going back, removing
 
-Updates arrive with the rest of your system: `sudo apt upgrade`, `sudo dnf upgrade`, or your desktop's software updater.
+Updates arrive with the rest of your system: `sudo apt upgrade`, `sudo dnf upgrade`, or your desktop's software updater. An app's plugin packages are updated with it.
 
-The repositories keep the last three versions of every package, so you can go back to an earlier one:
+The repositories keep the last three versions of every package, so you can go back to an earlier one. Name the plugin packages you have with the app, since each goes with one version of it:
 
 ```sh
 sudo apt install rick=1.2.2
 sudo dnf downgrade rick-1.2.2
+```
+
+```sh
+sudo apt install rick=1.2.2 rick-plugin-git=1.2.2
+sudo dnf downgrade rick-1.2.2 rick-plugin-git-1.2.2
 ```
 
 To remove an app, and the repository if you no longer want it:

@@ -30,7 +30,9 @@ trap 'rm -rf "$work"' EXIT
 published="$repo_root/keys/registry.pub"
 assert_file "$published"
 [ "$(wc -l < "$published")" -eq 2 ] || fail "keys/registry.pub is not the two lines of a minisign public key file"
-sed -n 1p "$published" | grep -Eq '^untrusted comment: minisign public key [0-9A-F]{16}$' \
+# minisign writes the id as a number: an id that begins with a zero has
+# fewer than sixteen digits there.
+sed -n 1p "$published" | grep -Eq '^untrusted comment: minisign public key [0-9A-F]{1,16}$' \
   || fail "keys/registry.pub: the first line is not the comment minisign writes"
 ! grep -qi 'secret' "$published" || fail "keys/registry.pub names a SECRET key; the key has leaked and has to be replaced"
 bytes="$(sed -n 2p "$published" | base64 -d | od -An -v -tx1 | tr -d ' \n')"
@@ -40,8 +42,10 @@ if [ "${#bytes}" -ne 84 ] || [ "${bytes:0:4}" != 4564 ]; then
 fi
 id=""
 for ((i = 18; i >= 4; i -= 2)); do id+="${bytes:i:2}"; done
+id="${id^^}"
+while [ "${#id}" -gt 1 ] && [ "${id:0:1}" = 0 ]; do id="${id:1}"; done
 commented="$(sed -n 's/^untrusted comment: minisign public key //p' "$published")"
-[ "${id^^}" = "$commented" ] || fail "keys/registry.pub: the key's id is ${id^^}, its comment says $commented"
+[ "$id" = "$commented" ] || fail "keys/registry.pub: the key's id is $id, its comment says $commented"
 # The documentation that prints the id prints this one.
 assert_contains "$repo_root/keys/README.md" "$commented"
 
@@ -143,6 +147,26 @@ PUBLIC_KEY="$work/broken.pub" refused "is not a minisign public key" \
 out="$(with_key "$work/key" "wrong-pass-4711" "$sign" "$work/index.json" 2>&1 || true)"
 ! grep -qF "$(sed -n 2p "$work/key/secret.key")" <<< "$out" || fail "sign.sh printed the secret key"
 ! grep -qF "wrong-pass-4711" <<< "$out" || fail "sign.sh printed the password"
+
+# A key whose id begins with a zero. minisign's comment leaves the zero out,
+# and so does sign.sh: one key has one name. About one key in sixteen is
+# such a key, so keys are made until one is.
+tries=0
+while :; do
+  tries=$((tries + 1))
+  [ "$tries" -le 2000 ] || fail "no key with an id that begins with a zero in $((tries - 1)) keys"
+  make_minisign_key "$work/zero"
+  zero_id="$(sed -n 's/^untrusted comment: minisign public key //p' "$work/zero/public.pub")"
+  [ "${#zero_id}" -ge 16 ] || break
+done
+rm -f "$work/index.json.minisig"
+out="$(with_key "$work/zero" "" "$sign" "$work/index.json")"
+grep -qxF "signed index.json with the key $zero_id" <<< "$out" || fail "sign.sh names the key of the comment $zero_id as: $out"
+minisign -V -H -m "$work/index.json" -p "$work/zero/public.pub" > /dev/null || fail "the signature of the key $zero_id does not verify"
+PUBLIC_KEY="$work/zero/public.pub" refused "REGISTRY_SIGNING_KEY is the key $key_id, and public.pub is the key $zero_id" \
+  with_key "$work/key" "a test password" "$sign" "$work/index.json"
+out="$(with_key "$work/zero" "" "$check")"
+grep -qF "the secrets hold the key $zero_id, the key of public.pub" <<< "$out" || fail "check-key.sh names the key $zero_id as: $out"
 
 # --- the key check of registry-key.yml -----------------------------------------------
 

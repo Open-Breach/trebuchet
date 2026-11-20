@@ -47,11 +47,15 @@ hex() {
 }
 # The id by which a key and its signatures name the key: the eight bytes
 # after the two of the algorithm, printed as minisign prints it in the
-# comment of a public key file, last byte first.
+# comment of a public key file. That is as one number, last byte first, and
+# so without the zeros an id may begin with: 0D7279AD8D4D6D51 is
+# D7279AD8D4D6D51 there, and here.
 key_id() {
   local bytes="${1:4:16}" id="" i
   for ((i = 14; i >= 0; i -= 2)); do id+="${bytes:i:2}"; done
-  printf '%s' "${id^^}"
+  id="${id^^}"
+  while [ "${#id}" -gt 1 ] && [ "${id:0:1}" = 0 ]; do id="${id:1}"; done
+  printf '%s' "$id"
 }
 
 # 4564 is Ed, the algorithm of a key; a public key is 42 bytes.
